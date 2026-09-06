@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 from app.agent.actions import FinishAction
 from app.agent.parser import parse_agent_action
@@ -14,7 +15,7 @@ from app.tools.workspace import Workspace
 
 class PythonGPTAgent:
 
-    def __init__(self, workspace_path: Path, llm: LLMClient):
+    def __init__(self, workspace_path: Path, llm: Optional[LLMClient] = None):
         self.workspace = Workspace(workspace_path)
 
         self.runtime = Runtime(workspace_path)
@@ -29,6 +30,8 @@ class PythonGPTAgent:
 
     def execute_tool(self, state: AgentState, tool: str, arguments: dict) -> dict:
 
+        state.iteration += 1
+
         result = self.tools.execute(tool, arguments)
 
         state.add_event(
@@ -38,6 +41,9 @@ class PythonGPTAgent:
         return result
 
     def run(self, task: str) -> AgentState:
+
+        if self.llm is None:
+            raise RuntimeError("An LLM client is required to run the autonomous agent.")
 
         state = self.create_state(task)
 
