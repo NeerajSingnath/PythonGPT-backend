@@ -93,15 +93,17 @@ def build_messages(task: str, history: list[dict]) -> list[dict[str, str]]:
                 }
             )
 
-        elif event_type == "invalid_action":
+        elif event_type == "finish_rejected":
 
             messages.append(
                 {
                     "role": "user",
                     "content": (
-                        "Your previous response was invalid. "
-                        "Return exactly one valid JSON action.\n"
+                        "You attempted to finish, but the "
+                        "verification gate rejected it.\n"
                         + json.dumps(data, ensure_ascii=False, default=str)
+                        + "\nRun appropriate verification "
+                        "before attempting to finish."
                     ),
                 }
             )

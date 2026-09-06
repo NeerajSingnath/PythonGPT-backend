@@ -71,6 +71,20 @@ class PythonGPTAgent:
 
             if isinstance(action, FinishAction):
 
+                if not state.verification_passed or state.changes_since_verification:
+
+                    state.add_event(
+                        "finish_rejected",
+                        {
+                            "reason": (
+                                "Project has not been verified "
+                                "after the latest changes."
+                            )
+                        },
+                    )
+
+                    continue
+
                 state.completed = True
 
                 state.add_event(
@@ -86,5 +100,22 @@ class PythonGPTAgent:
                 "tool_result",
                 {"tool": action.tool, "arguments": action.arguments, "result": result},
             )
+            if result.get("success"):
+
+                if action.tool in {
+                    "write_file",
+                    "delete_file",
+                }:
+                    state.changes_since_verification = True
+                    state.verification_passed = False
+
+                elif action.tool == "run_tests":
+                    state.verification_passed = True
+                    state.changes_since_verification = False
+
+            else:
+
+                if action.tool == "run_tests":
+                    state.verification_passed = False
 
         return state

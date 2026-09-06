@@ -4,7 +4,6 @@ from typing import Any
 
 @dataclass
 class AgentState:
-
     task: str
 
     plan: list[str] = field(default_factory=list)
@@ -12,10 +11,12 @@ class AgentState:
     history: list[dict[str, Any]] = field(default_factory=list)
 
     iteration: int = 0
-
     max_iterations: int = 20
-
     completed: bool = False
+
+    # Verification state
+    verification_passed: bool = False
+    changes_since_verification: bool = True
 
     def add_event(self, event_type: str, data: Any) -> None:
 
