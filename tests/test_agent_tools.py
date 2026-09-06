@@ -31,3 +31,27 @@ def test_agent_cannot_escape_workspace(tmp_path: Path):
 
     except ValueError:
         assert True
+
+
+from app.agent.agent import PythonGPTAgent
+
+
+def test_agent_tool_registry(tmp_path):
+
+    agent = PythonGPTAgent(tmp_path)
+
+    state = agent.create_state("Create a hello world program")
+
+    result = agent.execute_tool(
+        state, "write_file", {"path": "main.py", "content": 'print("PythonGPT Agent")'}
+    )
+
+    assert result["success"]
+
+    result = agent.execute_tool(state, "run_python", {"file": "main.py"})
+
+    assert result["success"]
+    assert "PythonGPT Agent" in result["stdout"]
+
+    assert state.iteration == 2
+    assert len(state.history) == 2
