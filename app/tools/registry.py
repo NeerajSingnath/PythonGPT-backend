@@ -1,0 +1,33 @@
+from typing import Any
+
+from app.tools.workspace import Workspace
+from app.tools.runtime import Runtime
+
+
+class ToolRegistry:
+
+    def __init__(self, workspace: Workspace, runtime: Runtime):
+        self.workspace = workspace
+        self.runtime = runtime
+
+    def execute(self, tool: str, arguments: dict[str, Any]) -> dict:
+
+        tools = {
+            "write_file": self.workspace.write_file,
+            "read_file": self.workspace.read_file,
+            "list_files": self.workspace.list_files,
+            "delete_file": self.workspace.delete_file,
+            "run_python": self.runtime.run_python,
+            "run_tests": self.runtime.run_tests,
+        }
+
+        function = tools.get(tool)
+
+        if function is None:
+            return {"success": False, "error": f"Unknown tool: {tool}"}
+
+        try:
+            return function(**arguments)
+
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
