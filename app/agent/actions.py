@@ -1,6 +1,6 @@
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
 ToolName = Literal[
     "write_file",
@@ -13,7 +13,9 @@ ToolName = Literal[
 
 
 class ToolAction(BaseModel):
-    reasoning: str = Field(description="Short explanation for the next action.")
+    type: Literal["tool"]
+
+    reasoning: str = Field(description="Brief reason for taking this action.")
 
     tool: ToolName
 
@@ -21,8 +23,17 @@ class ToolAction(BaseModel):
 
 
 class FinishAction(BaseModel):
+    type: Literal["finish"]
+
     reasoning: str
 
-    completed: bool = True
-
     summary: str
+
+
+AgentAction = Union[
+    ToolAction,
+    FinishAction,
+]
+
+
+agent_action_adapter = TypeAdapter(AgentAction)
