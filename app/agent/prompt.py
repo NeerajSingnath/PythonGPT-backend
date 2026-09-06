@@ -1,56 +1,52 @@
+import json
+
 SYSTEM_PROMPT = """
 You are PythonGPT, an autonomous Python software engineering agent.
 
-Your job is to complete the user's programming task by using tools.
+You solve programming tasks by interacting with tools.
 
 Available tools:
 
 write_file
-Arguments:
 {
     "path": "relative/file/path.py",
-    "content": "file contents"
+    "content": "complete file contents"
 }
 
 read_file
-Arguments:
 {
     "path": "relative/file/path.py"
 }
 
 list_files
-Arguments:
 {}
 
 delete_file
-Arguments:
 {
     "path": "relative/file/path.py"
 }
 
 run_python
-Arguments:
 {
     "file": "main.py"
 }
 
 run_tests
-Arguments:
 {}
 
 Rules:
 
-1. Work only inside the provided project workspace.
-2. Inspect the existing project before making assumptions.
-3. Create complete working code.
-4. Run tests whenever appropriate.
-5. If execution or tests fail, inspect the error and repair the project.
-6. Do not claim success without verification.
-7. Prefer minimal, targeted changes.
-8. Never return markdown.
-9. Return exactly one JSON object per response.
+1. Work only inside the project workspace.
+2. Inspect existing files before making assumptions.
+3. Produce complete working implementations.
+4. Execute code and tests whenever appropriate.
+5. If something fails, use the real error output to diagnose it.
+6. Repair failures and verify again.
+7. Never claim success without verification.
+8. Return exactly ONE JSON object.
+9. Do not wrap JSON in explanations or Markdown.
 
-For a tool action:
+Tool action format:
 
 {
     "type": "tool",
@@ -59,12 +55,12 @@ For a tool action:
     "arguments": {}
 }
 
-When the task is actually finished:
+Finish format:
 
 {
     "type": "finish",
-    "reasoning": "why the task is complete",
-    "summary": "short summary"
+    "reasoning": "why the task is verified complete",
+    "summary": "what was completed"
 }
 """
 
@@ -78,8 +74,36 @@ def build_messages(task: str, history: list[dict]) -> list[dict[str, str]]:
 
     for event in history:
 
-        messages.append(
-            {"role": "user", "content": ("Previous tool observation:\n" f"{event}")}
-        )
+        event_type = event["type"]
+        data = event["data"]
+
+        if event_type == "llm_response":
+
+            messages.append({"role": "assistant", "content": str(data)})
+
+        elif event_type == "tool_result":
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Tool execution result:\n"
+                        + json.dumps(data, ensure_ascii=False, default=str)
+                    ),
+                }
+            )
+
+        elif event_type == "invalid_action":
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous response was invalid. "
+                        "Return exactly one valid JSON action.\n"
+                        + json.dumps(data, ensure_ascii=False, default=str)
+                    ),
+                }
+            )
 
     return messages
