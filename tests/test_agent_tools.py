@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.tools.workspace import Workspace
 from app.tools.runtime import Runtime
+from app.tools.terminal import ControlledTerminal
 
 
 def test_agent_can_create_and_run_code(tmp_path: Path):
@@ -99,3 +100,36 @@ print("hello")
 
     assert not result["success"]
     assert "occurs 2 times" in result["error"]
+
+
+def test_controlled_terminal_allows_python_file(tmp_path: Path):
+
+    terminal = ControlledTerminal(tmp_path)
+
+    script = tmp_path / "hello.py"
+
+    script.write_text(
+        'print("PythonGPT terminal")',
+        encoding="utf-8",
+    )
+
+    result = terminal.run_command(
+        command="python",
+        arguments=["hello.py"],
+    )
+
+    assert result["success"]
+    assert "PythonGPT terminal" in result["stdout"]
+
+
+def test_controlled_terminal_blocks_commands(tmp_path: Path):
+
+    terminal = ControlledTerminal(tmp_path)
+
+    result = terminal.run_command(
+        command="powershell",
+        arguments=["-Command", "Remove-Item *"],
+    )
+
+    assert not result["success"]
+    assert "not allowed" in result["error"]

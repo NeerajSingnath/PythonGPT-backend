@@ -2,13 +2,20 @@ from typing import Any
 
 from app.tools.workspace import Workspace
 from app.tools.runtime import Runtime
+from app.tools.terminal import ControlledTerminal
 
 
 class ToolRegistry:
 
-    def __init__(self, workspace: Workspace, runtime: Runtime):
+    def __init__(
+        self,
+        workspace: Workspace,
+        runtime: Runtime,
+        terminal: ControlledTerminal,
+    ):
         self.workspace = workspace
         self.runtime = runtime
+        self.terminal = terminal
 
     def execute(self, tool: str, arguments: dict[str, Any]) -> dict:
 
@@ -20,6 +27,7 @@ class ToolRegistry:
             "delete_file": self.workspace.delete_file,
             "run_python": self.runtime.run_python,
             "run_tests": self.runtime.run_tests,
+            "run_command": self.terminal.run_command,
         }
 
         function = tools.get(tool)

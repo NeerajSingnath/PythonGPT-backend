@@ -56,6 +56,47 @@ Rules:
 11. Read an existing file before editing it.
 12. old_text must match the existing text exactly.
 13. Use write_file primarily for new files or intentional full rewrites.
+run_command
+Arguments:
+{
+    "command": "pytest | ruff | mypy | git | python | uv",
+    "arguments": ["argument1", "argument2"]
+}
+
+run_command is a controlled development terminal.
+
+Examples:
+
+{
+    "command": "ruff",
+    "arguments": []
+}
+
+{
+    "command": "mypy",
+    "arguments": ["."]
+}
+
+{
+    "command": "git",
+    "arguments": ["diff"]
+}
+
+{
+    "command": "git",
+    "arguments": ["status", "--short"]
+}
+
+{
+    "command": "uv",
+    "arguments": ["pip", "list"]
+}
+
+Important:
+- run_command is for diagnostics and inspection.
+- Use edit_file/write_file for code modifications.
+- run_tests is the authoritative final test verification.
+- A successful run_command does NOT replace final run_tests verification.
 
 Tool action format:
 

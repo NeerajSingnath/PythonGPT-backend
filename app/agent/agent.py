@@ -1,3 +1,4 @@
+from openai.types import eval_stored_completions_data_source_config
 from app.agent import state
 from asyncio import taskgroups
 from pathlib import Path
@@ -13,6 +14,7 @@ from app.llm.base import LLMClient
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import Runtime
 from app.tools.workspace import Workspace
+from app.tools.terminal import ControlledTerminal
 
 
 class PythonGPTAgent:
@@ -22,7 +24,13 @@ class PythonGPTAgent:
 
         self.runtime = Runtime(workspace_path)
 
-        self.tools = ToolRegistry(workspace=self.workspace, runtime=self.runtime)
+        self.terminal = ControlledTerminal(workspace_path)
+
+        self.tools = ToolRegistry(
+            workspace=self.workspace,
+            runtime=self.runtime,
+            terminal=self.terminal,
+        )
 
         self.llm = llm
 

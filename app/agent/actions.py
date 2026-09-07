@@ -10,6 +10,7 @@ ToolName = Literal[
     "delete_file",
     "run_python",
     "run_tests",
+    "run_command",
 ]
 
 
