@@ -2,6 +2,8 @@ from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field, TypeAdapter
 
+from app.agent.plan import PlanStatus
+
 ToolName = Literal[
     "write_file",
     "edit_file",
@@ -16,10 +18,33 @@ ToolName = Literal[
 ]
 
 
+class PlanAction(BaseModel):
+    type: Literal["plan"]
+
+    reasoning: str
+
+    steps: list[str] = Field(
+        min_length=1,
+        max_length=20,
+    )
+
+
+class PlanStepAction(BaseModel):
+    type: Literal["plan_step"]
+
+    reasoning: str
+
+    step_id: int
+
+    status: PlanStatus
+
+    note: str | None = None
+
+
 class ToolAction(BaseModel):
     type: Literal["tool"]
 
-    reasoning: str = Field(description="Brief reason for taking this action.")
+    reasoning: str = Field(description=("Brief reason for taking this action."))
 
     tool: ToolName
 
@@ -35,6 +60,8 @@ class FinishAction(BaseModel):
 
 
 AgentAction = Union[
+    PlanAction,
+    PlanStepAction,
     ToolAction,
     FinishAction,
 ]
