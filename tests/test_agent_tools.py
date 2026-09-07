@@ -55,3 +55,47 @@ def test_agent_tool_registry(tmp_path):
 
     assert state.iteration == 2
     assert len(state.history) == 2
+
+
+def test_edit_file(tmp_path: Path):
+
+    workspace = Workspace(tmp_path)
+
+    workspace.write_file(
+        "calculator.py",
+        """
+def divide(a, b):
+    return a * b
+""".strip(),
+    )
+
+    result = workspace.edit_file(
+        path="calculator.py", old_text="return a * b", new_text="return a / b"
+    )
+
+    assert result["success"]
+
+    result = workspace.read_file("calculator.py")
+
+    assert "return a / b" in result["content"]
+    assert "return a * b" not in result["content"]
+
+
+def test_edit_file_rejects_multiple_matches(tmp_path: Path):
+
+    workspace = Workspace(tmp_path)
+
+    workspace.write_file(
+        "example.py",
+        """
+print("hello")
+print("hello")
+""".strip(),
+    )
+
+    result = workspace.edit_file(
+        path="example.py", old_text='print("hello")', new_text='print("PythonGPT")'
+    )
+
+    assert not result["success"]
+    assert "occurs 2 times" in result["error"]

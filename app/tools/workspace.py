@@ -59,3 +59,37 @@ class Workspace:
         file_path.unlink()
 
         return {"success": True, "path": path}
+
+    def edit_file(self, path: str, old_text: str, new_text: str) -> dict:
+
+        file_path = self._safe_path(path)
+
+        if not file_path.exists():
+            return {"success": False, "error": "File not found"}
+
+        content = file_path.read_text(encoding="utf-8")
+
+        occurrences = content.count(old_text)
+
+        if occurrences == 0:
+            return {
+                "success": False,
+                "error": (
+                    "Target text was not found. " "Read the file again before editing."
+                ),
+            }
+
+        if occurrences > 1:
+            return {
+                "success": False,
+                "error": (
+                    f"Target text occurs {occurrences} times. "
+                    "Provide a more specific old_text."
+                ),
+            }
+
+        updated = content.replace(old_text, new_text, 1)
+
+        file_path.write_text(updated, encoding="utf-8")
+
+        return {"success": True, "path": path, "replacements": 1}

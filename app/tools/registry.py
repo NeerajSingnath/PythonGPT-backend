@@ -14,6 +14,7 @@ class ToolRegistry:
 
         tools = {
             "write_file": self.workspace.write_file,
+            "edit_file": self.workspace.edit_file,
             "read_file": self.workspace.read_file,
             "list_files": self.workspace.list_files,
             "delete_file": self.workspace.delete_file,

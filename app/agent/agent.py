@@ -1,3 +1,5 @@
+from app.agent import state
+from asyncio import taskgroups
 from pathlib import Path
 from typing import Optional
 
@@ -24,9 +26,9 @@ class PythonGPTAgent:
 
         self.llm = llm
 
-    def create_state(self, task: str) -> AgentState:
+    def create_state(self, task: str, mode: str = "general") -> AgentState:
 
-        return AgentState(task=task)
+        return AgentState(task=task, mode=mode)
 
     def execute_tool(self, state: AgentState, tool: str, arguments: dict) -> dict:
 
@@ -40,12 +42,12 @@ class PythonGPTAgent:
 
         return result
 
-    def run(self, task: str) -> AgentState:
+    def run(self, task: str, mode: str = "general") -> AgentState:
 
         if self.llm is None:
             raise RuntimeError("An LLM client is required to run the autonomous agent.")
 
-        state = self.create_state(task)
+        state = self.create_state(task, mode=mode)
 
         while not state.completed and state.iteration < state.max_iterations:
 
@@ -95,27 +97,55 @@ class PythonGPTAgent:
                 break
 
             result = self.tools.execute(action.tool, action.arguments)
+            if (
+                state.mode == "repair"
+                and action.tool
+                in {
+                    "write_file",
+                    "edit_file",
+                    "delete_file",
+                }
+                and not state.baseline_verification_run
+            ):
+
+                state.add_event(
+                    "action_rejected",
+                    {
+                        "tool": action.tool,
+                        "reason": (
+                            "Repair mode requires a baseline "
+                            "test run before modifying files."
+                        ),
+                    },
+                )
+
+                continue
 
             state.add_event(
                 "tool_result",
                 {"tool": action.tool, "arguments": action.arguments, "result": result},
             )
-            if result.get("success"):
+            if action.tool == "run_tests":
 
-                if action.tool in {
-                    "write_file",
-                    "delete_file",
-                }:
-                    state.changes_since_verification = True
-                    state.verification_passed = False
+                # Record the very first test run as the baseline
+                if not state.baseline_verification_run:
+                    state.baseline_verification_run = True
+                    state.baseline_verification_failed = not result.get(
+                        "success", False
+                    )
 
-                elif action.tool == "run_tests":
+                if result.get("success"):
                     state.verification_passed = True
                     state.changes_since_verification = False
-
-            else:
-
-                if action.tool == "run_tests":
+                else:
                     state.verification_passed = False
+
+            elif result.get("success") and action.tool in {
+                "write_file",
+                "edit_file",
+                "delete_file",
+            }:
+                state.changes_since_verification = True
+                state.verification_passed = False
 
         return state

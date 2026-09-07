@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 
 ToolName = Literal[
     "write_file",
+    "edit_file",
     "read_file",
     "list_files",
     "delete_file",

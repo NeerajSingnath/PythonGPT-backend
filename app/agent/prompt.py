@@ -34,6 +34,13 @@ run_python
 run_tests
 {}
 
+edit_file
+Arguments:
+{
+    "path": "relative/file/path.py",
+    "old_text": "exact text currently in the file",
+    "new_text": "replacement text"
+}
 Rules:
 
 1. Work only inside the project workspace.
@@ -45,6 +52,10 @@ Rules:
 7. Never claim success without verification.
 8. Return exactly ONE JSON object.
 9. Do not wrap JSON in explanations or Markdown.
+10. Prefer edit_file over write_file when modifying an existing file.
+11. Read an existing file before editing it.
+12. old_text must match the existing text exactly.
+13. Use write_file primarily for new files or intentional full rewrites.
 
 Tool action format:
 
