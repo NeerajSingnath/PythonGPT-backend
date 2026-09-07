@@ -2,7 +2,7 @@ from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field, TypeAdapter
 
-from app.agent.plan import PlanStatus
+from app.agent.plan import PlanKind, PlanStatus
 
 ToolName = Literal[
     "write_file",
@@ -17,10 +17,16 @@ ToolName = Literal[
     "run_command",
 ]
 
+
 PlanCompletionMode = Literal[
     "tool_success",
     "tool_execution",
 ]
+
+
+class PlanStepSpec(BaseModel):
+    description: str
+    kind: PlanKind = "general"
 
 
 class PlanAction(BaseModel):
@@ -28,7 +34,12 @@ class PlanAction(BaseModel):
 
     reasoning: str
 
-    steps: list[str] = Field(
+    steps: list[
+        Union[
+            str,
+            PlanStepSpec,
+        ]
+    ] = Field(
         min_length=1,
         max_length=20,
     )

@@ -5,14 +5,13 @@ from app.agent.actions import (
     FinishAction,
     PlanAction,
     PlanStepAction,
+    PlanStepSpec,
 )
 from app.agent.parser import parse_agent_action
 from app.agent.plan import PlanStep
 from app.agent.prompt import build_messages
 from app.agent.state import AgentState
-
 from app.llm.base import LLMClient
-
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import Runtime
 from app.tools.terminal import ControlledTerminal
@@ -32,9 +31,7 @@ class PythonGPTAgent:
         llm: Optional[LLMClient] = None,
     ):
         self.workspace = Workspace(workspace_path)
-
         self.runtime = Runtime(workspace_path)
-
         self.terminal = ControlledTerminal(workspace_path)
 
         self.tools = ToolRegistry(
@@ -88,24 +85,48 @@ class PythonGPTAgent:
     def _create_plan(
         self,
         state: AgentState,
-        steps: list[str],
+        steps: list[str | PlanStepSpec],
     ) -> None:
 
-        state.plan = [
-            PlanStep(
-                id=index,
-                description=description,
+        plan = []
+
+        for index, step in enumerate(
+            steps,
+            start=1,
+        ):
+            if isinstance(step, str):
+                description = step
+                kind = "general"
+            else:
+                description = step.description
+                kind = step.kind
+
+            plan.append(
+                PlanStep(
+                    id=index,
+                    description=description,
+                    kind=kind,
+                )
             )
-            for index, description in enumerate(
-                steps,
-                start=1,
-            )
-        ]
+
+        state.plan = plan
 
         state.add_event(
             "plan_created",
             {"steps": [step.model_dump() for step in state.plan]},
         )
+
+    def _get_plan_step(
+        self,
+        state: AgentState,
+        step_id: int,
+    ) -> PlanStep | None:
+
+        for step in state.plan:
+            if step.id == step_id:
+                return step
+
+        return None
 
     def _update_plan_step(
         self,
@@ -115,29 +136,215 @@ class PythonGPTAgent:
         note: str | None = None,
     ) -> bool:
 
-        for step in state.plan:
-
-            if step.id == step_id:
-
-                step.status = status
-                step.note = note
-
-                state.add_event(
-                    "plan_updated",
-                    {"step": step.model_dump()},
-                )
-
-                return True
-
-        state.add_event(
-            "plan_update_rejected",
-            {
-                "step_id": step_id,
-                "reason": "Unknown plan step.",
-            },
+        step = self._get_plan_step(
+            state,
+            step_id,
         )
 
+        if step is None:
+            state.add_event(
+                "plan_update_rejected",
+                {
+                    "step_id": step_id,
+                    "reason": "Unknown plan step.",
+                },
+            )
+
+            return False
+
+        step.status = status
+        step.note = note
+
+        state.add_event(
+            "plan_updated",
+            {"step": step.model_dump()},
+        )
+
+        return True
+
+    def _manual_plan_completion_allowed(
+        self,
+        state: AgentState,
+        step: PlanStep,
+    ) -> bool:
+
+        if step.kind == "general":
+            return True
+
+        if step.kind == "diagnosis":
+            if state.mode == "repair":
+                return state.baseline_verification_run
+
+            return True
+
         return False
+
+    def _tool_can_complete_plan_step(
+        self,
+        step: PlanStep,
+        action,
+        result: dict,
+    ) -> bool:
+
+        mode = action.complete_plan_step_on
+
+        success = result.get(
+            "success",
+            False,
+        )
+
+        if step.kind == "general":
+
+            if mode == "tool_success":
+                return success
+
+            if mode == "tool_execution":
+                return success or "return_code" in result
+
+            return False
+
+        if step.kind == "inspection":
+
+            return (
+                mode == "tool_success"
+                and success
+                and action.tool
+                in {
+                    "list_files",
+                    "read_file",
+                    "search_code",
+                    "python_outline",
+                }
+            )
+
+        if step.kind == "baseline_test":
+
+            return (
+                mode == "tool_execution"
+                and action.tool == "run_tests"
+                and (success or "return_code" in result)
+            )
+
+        if step.kind == "diagnosis":
+            return False
+
+        if step.kind == "implementation":
+
+            return (
+                mode == "tool_success"
+                and success
+                and action.tool
+                in {
+                    "write_file",
+                    "edit_file",
+                    "delete_file",
+                }
+            )
+
+        if step.kind == "quality_check":
+
+            if mode != "tool_success" or not success or action.tool != "run_command":
+                return False
+
+            command = action.arguments.get("command")
+
+            return command in {
+                "ruff",
+                "mypy",
+            }
+
+        if step.kind == "verification":
+
+            return mode == "tool_success" and success and action.tool == "run_tests"
+
+        if step.kind == "review":
+
+            if mode != "tool_success" or not success or action.tool != "run_command":
+                return False
+
+            command = action.arguments.get("command")
+
+            arguments = action.arguments.get(
+                "arguments",
+                [],
+            )
+
+            if command != "git":
+                return False
+
+            if not arguments:
+                return False
+
+            return arguments[0] in {
+                "diff",
+                "status",
+                "show",
+                "log",
+            }
+
+        return False
+
+    def _complete_plan_step_from_tool(
+        self,
+        state: AgentState,
+        action,
+        result: dict,
+    ) -> None:
+
+        if action.plan_step_id is None:
+            return
+
+        if action.complete_plan_step_on is None:
+            return
+
+        step = self._get_plan_step(
+            state,
+            action.plan_step_id,
+        )
+
+        if step is None:
+            state.add_event(
+                "plan_update_rejected",
+                {
+                    "step_id": action.plan_step_id,
+                    "reason": "Unknown plan step.",
+                },
+            )
+
+            return
+
+        if not self._tool_can_complete_plan_step(
+            step,
+            action,
+            result,
+        ):
+            state.add_event(
+                "plan_update_rejected",
+                {
+                    "step_id": step.id,
+                    "kind": step.kind,
+                    "tool": action.tool,
+                    "reason": (
+                        "This tool result is not "
+                        "valid evidence for completing "
+                        "this plan step."
+                    ),
+                },
+            )
+
+            return
+
+        note = action.completion_note
+
+        if note is None:
+            note = f"{action.tool} provided valid " "completion evidence."
+
+        self._update_plan_step(
+            state=state,
+            step_id=step.id,
+            status="completed",
+            note=note,
+        )
 
     def run(
         self,
@@ -223,10 +430,48 @@ class PythonGPTAgent:
             ):
 
                 if not state.plan:
-
                     state.add_event(
                         "plan_update_rejected",
                         {"reason": "No plan exists yet."},
+                    )
+
+                    continue
+
+                step = self._get_plan_step(
+                    state,
+                    action.step_id,
+                )
+
+                if step is None:
+                    state.add_event(
+                        "plan_update_rejected",
+                        {
+                            "step_id": action.step_id,
+                            "reason": "Unknown plan step.",
+                        },
+                    )
+
+                    continue
+
+                if (
+                    action.status == "completed"
+                    and not self._manual_plan_completion_allowed(
+                        state,
+                        step,
+                    )
+                ):
+                    state.add_event(
+                        "plan_update_rejected",
+                        {
+                            "step_id": step.id,
+                            "kind": step.kind,
+                            "reason": (
+                                "This typed plan step "
+                                "requires valid tool "
+                                "evidence before it can "
+                                "be completed."
+                            ),
+                        },
                     )
 
                     continue
@@ -278,6 +523,7 @@ class PythonGPTAgent:
                             "incomplete_plan_steps": [
                                 {
                                     "id": step.id,
+                                    "kind": step.kind,
                                     "description": step.description,
                                     "status": step.status,
                                 }
@@ -411,6 +657,12 @@ class PythonGPTAgent:
                     else:
 
                         state.passed_quality_checks.discard(command)
+
+            self._complete_plan_step_from_tool(
+                state=state,
+                action=action,
+                result=result,
+            )
 
         if not state.completed and state.iteration >= state.max_iterations:
 
