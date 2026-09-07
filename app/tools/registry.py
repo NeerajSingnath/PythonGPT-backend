@@ -17,7 +17,11 @@ class ToolRegistry:
         self.runtime = runtime
         self.terminal = terminal
 
-    def execute(self, tool: str, arguments: dict[str, Any]) -> dict:
+    def execute(
+        self,
+        tool: str,
+        arguments: dict[str, Any],
+    ) -> dict:
 
         tools = {
             "write_file": self.workspace.write_file,
@@ -33,10 +37,16 @@ class ToolRegistry:
         function = tools.get(tool)
 
         if function is None:
-            return {"success": False, "error": f"Unknown tool: {tool}"}
+            return {
+                "success": False,
+                "error": f"Unknown tool: {tool}",
+            }
 
         try:
             return function(**arguments)
 
         except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            return {
+                "success": False,
+                "error": str(exc),
+            }

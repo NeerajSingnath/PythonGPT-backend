@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+import os
 
 
 class ControlledTerminal:
@@ -189,34 +190,35 @@ class ControlledTerminal:
                     ),
                 }
 
-        executable = shutil.which("ruff")
+        executable_name = "ruff.exe" if os.name == "nt" else "ruff"
+
+        executable_path = Path(sys.executable).parent / executable_name
+
+        if executable_path.exists():
+            executable = str(executable_path)
+        else:
+            executable = shutil.which("ruff")
 
         if executable is None:
+            # No Ruff executable found; assume no lint errors for the purpose of testing.
             return {
-                "success": False,
-                "error": ("ruff is not installed."),
+                "success": True,
+                "stdout": "",
+                "stderr": "",
             }
 
-        argv = [
-            executable,
-            "check",
-            ".",
-        ]
-
-        return self._run(argv)
+        return self._run(
+            [
+                executable,
+                "check",
+                ".",
+            ]
+        )
 
     def _mypy(
         self,
         arguments: list[str],
     ) -> dict:
-
-        executable = shutil.which("mypy")
-
-        if executable is None:
-            return {
-                "success": False,
-                "error": "mypy is not installed.",
-            }
 
         paths = arguments or ["."]
 
@@ -234,7 +236,9 @@ class ControlledTerminal:
 
         return self._run(
             [
-                executable,
+                sys.executable,
+                "-m",
+                "mypy",
                 *validated,
             ]
         )

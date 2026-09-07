@@ -133,3 +133,47 @@ def test_controlled_terminal_blocks_commands(tmp_path: Path):
 
     assert not result["success"]
     assert "not allowed" in result["error"]
+
+
+def test_controlled_terminal_runs_ruff(
+    tmp_path: Path,
+):
+
+    terminal = ControlledTerminal(tmp_path)
+
+    (tmp_path / "main.py").write_text(
+        ("def add(a, b):\n" "    return a + b\n"),
+        encoding="utf-8",
+    )
+
+    result = terminal.run_command(
+        command="ruff",
+        arguments=[],
+    )
+
+    assert result["success"], result
+
+
+def test_agent_registry_runs_ruff(
+    tmp_path: Path,
+):
+
+    agent = PythonGPTAgent(workspace_path=tmp_path)
+
+    (tmp_path / "main.py").write_text(
+        "def add(a, b):\n" "    return a + b\n",
+        encoding="utf-8",
+    )
+
+    state = agent.create_state("Test Ruff")
+
+    result = agent.execute_tool(
+        state,
+        "run_command",
+        {
+            "command": "ruff",
+            "arguments": [],
+        },
+    )
+
+    assert result["success"], result
