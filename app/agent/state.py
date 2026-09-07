@@ -15,7 +15,7 @@ class AgentState:
 
     iteration: int = 0
 
-    max_iterations: int = 20
+    max_iterations: int = 50
 
     completed: bool = False
 
