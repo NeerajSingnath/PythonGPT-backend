@@ -7,6 +7,8 @@ ToolName = Literal[
     "edit_file",
     "read_file",
     "list_files",
+    "search_code",
+    "python_outline",
     "delete_file",
     "run_python",
     "run_tests",

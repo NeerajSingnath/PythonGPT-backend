@@ -28,6 +28,8 @@ class ToolRegistry:
             "edit_file": self.workspace.edit_file,
             "read_file": self.workspace.read_file,
             "list_files": self.workspace.list_files,
+            "search_code": self.workspace.search_code,
+            "python_outline": self.workspace.python_outline,
             "delete_file": self.workspace.delete_file,
             "run_python": self.runtime.run_python,
             "run_tests": self.runtime.run_tests,

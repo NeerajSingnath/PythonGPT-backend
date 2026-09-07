@@ -177,3 +177,101 @@ def test_agent_registry_runs_ruff(
     )
 
     assert result["success"], result
+
+
+def test_list_files_ignores_git_directory(
+    tmp_path: Path,
+):
+
+    workspace = Workspace(tmp_path)
+
+    workspace.write_file(
+        "main.py",
+        "print('hello')",
+    )
+
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+
+    (git_dir / "config").write_text(
+        "fake git config",
+        encoding="utf-8",
+    )
+
+    result = workspace.list_files()
+
+    assert result["success"]
+
+    assert "main.py" in result["files"]
+
+    assert not any(".git" in file for file in result["files"])
+
+
+def test_search_code(
+    tmp_path: Path,
+):
+
+    workspace = Workspace(tmp_path)
+
+    workspace.write_file(
+        "auth.py",
+        ("def authenticate(user):\n" "    return user is not None\n"),
+    )
+
+    workspace.write_file(
+        "main.py",
+        ("from auth import authenticate\n"),
+    )
+
+    result = workspace.search_code("authenticate")
+
+    assert result["success"]
+
+    assert len(result["matches"]) == 2
+
+    paths = {match["path"] for match in result["matches"]}
+
+    assert "auth.py" in paths
+    assert "main.py" in paths
+
+
+def test_python_outline(
+    tmp_path: Path,
+):
+
+    workspace = Workspace(tmp_path)
+
+    workspace.write_file(
+        "service.py",
+        """
+import os
+
+
+class UserService:
+
+    async def fetch_user(self):
+        pass
+
+    def create_user(self):
+        pass
+
+
+def helper():
+    pass
+""".strip(),
+    )
+
+    result = workspace.python_outline("service.py")
+
+    assert result["success"]
+
+    assert result["classes"][0]["name"] == "UserService"
+
+    methods = {method["name"] for method in result["classes"][0]["methods"]}
+
+    assert methods == {
+        "fetch_user",
+        "create_user",
+    }
+
+    assert result["functions"][0]["name"] == "helper"

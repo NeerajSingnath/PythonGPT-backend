@@ -41,6 +41,30 @@ Arguments:
     "old_text": "exact text currently in the file",
     "new_text": "replacement text"
 }
+search_code
+Arguments:
+{
+    "query": "text or symbol to search for",
+    "path": ".",
+    "max_results": 50
+}
+
+Search the project without reading every file.
+Prefer search_code when locating symbols, functions,
+imports, error messages, configuration, or references.
+
+
+python_outline
+Arguments:
+{
+    "path": "relative/python/file.py"
+}
+
+Returns the structural outline of a Python file using
+Python AST, including imports, functions, classes and methods.
+
+Prefer python_outline before reading a large Python file
+when you only need to understand its structure.
 Rules:
 
 1. Work only inside the project workspace.
@@ -57,6 +81,10 @@ Rules:
 12. old_text must match the existing text exactly.
 13. Use write_file primarily for new files or intentional full rewrites.
 run_command
+14. Do not inspect .git, .venv, cache, build or dependency directories.
+15. Prefer search_code over opening many files manually.
+16. Prefer python_outline for understanding large Python modules.
+17. Read the complete file only when its actual implementation is needed.
 Arguments:
 {
     "command": "pytest | ruff | mypy | git | python | uv",
