@@ -74,7 +74,6 @@ class PythonGPTAgent:
             if isinstance(action, FinishAction):
 
                 if not state.verification_passed or state.changes_since_verification:
-
                     state.add_event(
                         "finish_rejected",
                         {
@@ -84,7 +83,6 @@ class PythonGPTAgent:
                             )
                         },
                     )
-
                     continue
 
                 state.completed = True
@@ -96,7 +94,6 @@ class PythonGPTAgent:
 
                 break
 
-            result = self.tools.execute(action.tool, action.arguments)
             if (
                 state.mode == "repair"
                 and action.tool
@@ -107,7 +104,6 @@ class PythonGPTAgent:
                 }
                 and not state.baseline_verification_run
             ):
-
                 state.add_event(
                     "action_rejected",
                     {
@@ -121,13 +117,15 @@ class PythonGPTAgent:
 
                 continue
 
+            result = self.tools.execute(action.tool, action.arguments)
+
             state.add_event(
                 "tool_result",
                 {"tool": action.tool, "arguments": action.arguments, "result": result},
             )
+
             if action.tool == "run_tests":
 
-                # Record the very first test run as the baseline
                 if not state.baseline_verification_run:
                     state.baseline_verification_run = True
                     state.baseline_verification_failed = not result.get(
@@ -137,6 +135,7 @@ class PythonGPTAgent:
                 if result.get("success"):
                     state.verification_passed = True
                     state.changes_since_verification = False
+
                 else:
                     state.verification_passed = False
 
