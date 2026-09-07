@@ -17,6 +17,11 @@ ToolName = Literal[
     "run_command",
 ]
 
+PlanCompletionMode = Literal[
+    "tool_success",
+    "tool_execution",
+]
+
 
 class PlanAction(BaseModel):
     type: Literal["plan"]
@@ -49,6 +54,12 @@ class ToolAction(BaseModel):
     tool: ToolName
 
     arguments: dict[str, Any]
+
+    plan_step_id: int | None = None
+
+    complete_plan_step_on: PlanCompletionMode | None = None
+
+    completion_note: str | None = None
 
 
 class FinishAction(BaseModel):

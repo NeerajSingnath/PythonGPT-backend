@@ -1,14 +1,29 @@
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
 from app.agent.agent import PythonGPTAgent
 from app.llm.nvidia import NvidiaLLMClient
 
+
+def remove_readonly(func, path, exc):
+    if isinstance(exc, PermissionError):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+        return
+
+    raise exc
+
+
 workspace = Path("workspaces/planner_repair")
 
 if workspace.exists():
-    shutil.rmtree(workspace)
+    shutil.rmtree(
+        workspace,
+        onexc=remove_readonly,
+    )
 
 workspace.mkdir(
     parents=True,
@@ -106,7 +121,6 @@ Requirements:
 )
 
 print("\n===== PythonGPT Planner Repair =====")
-
 print("Completed:", state.completed)
 print("Iterations:", state.iteration)
 print("Tests verified:", state.verification_passed)
