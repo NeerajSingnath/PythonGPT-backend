@@ -44,7 +44,7 @@ class PlanStepAction(BaseModel):
 class ToolAction(BaseModel):
     type: Literal["tool"]
 
-    reasoning: str = Field(description=("Brief reason for taking this action."))
+    reasoning: str = Field(description="Brief reason for taking this action.")
 
     tool: ToolName
 

@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agent.plan import PlanStep
+
 
 @dataclass
 class AgentState:
 
     task: str
 
-    plan: list[str] = field(default_factory=list)
+    plan: list[PlanStep] = field(default_factory=list)
 
     history: list[dict[str, Any]] = field(default_factory=list)
 
@@ -18,6 +20,8 @@ class AgentState:
     completed: bool = False
 
     mode: str = "general"
+
+    planning_required: bool = False
 
     baseline_verification_run: bool = False
 

@@ -1,8 +1,13 @@
 from pathlib import Path
 from typing import Optional
 
-from app.agent.actions import FinishAction
+from app.agent.actions import (
+    FinishAction,
+    PlanAction,
+    PlanStepAction,
+)
 from app.agent.parser import parse_agent_action
+from app.agent.plan import PlanStep
 from app.agent.prompt import build_messages
 from app.agent.state import AgentState
 
@@ -10,8 +15,8 @@ from app.llm.base import LLMClient
 
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import Runtime
-from app.tools.workspace import Workspace
 from app.tools.terminal import ControlledTerminal
+from app.tools.workspace import Workspace
 
 SUPPORTED_QUALITY_CHECKS = {
     "ruff",
@@ -45,11 +50,13 @@ class PythonGPTAgent:
         task: str,
         mode: str = "general",
         required_quality_checks: set[str] | None = None,
+        planning_required: bool = False,
     ) -> AgentState:
 
         return AgentState(
             task=task,
             mode=mode,
+            planning_required=planning_required,
             required_quality_checks=set(required_quality_checks or ()),
         )
 
@@ -78,11 +85,66 @@ class PythonGPTAgent:
 
         return result
 
+    def _create_plan(
+        self,
+        state: AgentState,
+        steps: list[str],
+    ) -> None:
+
+        state.plan = [
+            PlanStep(
+                id=index,
+                description=description,
+            )
+            for index, description in enumerate(
+                steps,
+                start=1,
+            )
+        ]
+
+        state.add_event(
+            "plan_created",
+            {"steps": [step.model_dump() for step in state.plan]},
+        )
+
+    def _update_plan_step(
+        self,
+        state: AgentState,
+        step_id: int,
+        status: str,
+        note: str | None = None,
+    ) -> bool:
+
+        for step in state.plan:
+
+            if step.id == step_id:
+
+                step.status = status
+                step.note = note
+
+                state.add_event(
+                    "plan_updated",
+                    {"step": step.model_dump()},
+                )
+
+                return True
+
+        state.add_event(
+            "plan_update_rejected",
+            {
+                "step_id": step_id,
+                "reason": "Unknown plan step.",
+            },
+        )
+
+        return False
+
     def run(
         self,
         task: str,
         mode: str = "general",
         required_quality_checks: set[str] | None = None,
+        planning_required: bool = False,
     ) -> AgentState:
 
         if self.llm is None:
@@ -109,6 +171,7 @@ class PythonGPTAgent:
             task=task,
             mode=mode,
             required_quality_checks=checks,
+            planning_required=planning_required,
         )
 
         while not state.completed and state.iteration < state.max_iterations:
@@ -144,6 +207,41 @@ class PythonGPTAgent:
 
             if isinstance(
                 action,
+                PlanAction,
+            ):
+
+                self._create_plan(
+                    state=state,
+                    steps=action.steps,
+                )
+
+                continue
+
+            if isinstance(
+                action,
+                PlanStepAction,
+            ):
+
+                if not state.plan:
+
+                    state.add_event(
+                        "plan_update_rejected",
+                        {"reason": "No plan exists yet."},
+                    )
+
+                    continue
+
+                self._update_plan_step(
+                    state=state,
+                    step_id=action.step_id,
+                    status=action.status,
+                    note=action.note,
+                )
+
+                continue
+
+            if isinstance(
+                action,
                 FinishAction,
             ):
 
@@ -151,21 +249,40 @@ class PythonGPTAgent:
                     state.required_quality_checks - state.passed_quality_checks
                 )
 
+                incomplete_plan_steps = [
+                    step for step in state.plan if step.status != "completed"
+                ]
+
+                plan_missing = state.planning_required and not state.plan
+
                 if (
                     not state.verification_passed
                     or state.changes_since_verification
                     or missing_quality_checks
+                    or plan_missing
+                    or (state.planning_required and incomplete_plan_steps)
                 ):
 
                     state.add_event(
                         "finish_rejected",
                         {
                             "reason": (
-                                "Required verification " "has not been completed."
+                                "Required verification "
+                                "or planning has not "
+                                "been completed."
                             ),
                             "tests_passed": state.verification_passed,
                             "changes_since_verification": state.changes_since_verification,
                             "missing_quality_checks": sorted(missing_quality_checks),
+                            "plan_missing": plan_missing,
+                            "incomplete_plan_steps": [
+                                {
+                                    "id": step.id,
+                                    "description": step.description,
+                                    "status": step.status,
+                                }
+                                for step in incomplete_plan_steps
+                            ],
                         },
                     )
 
@@ -182,6 +299,20 @@ class PythonGPTAgent:
                 )
 
                 break
+
+            if state.planning_required and not state.plan:
+
+                state.add_event(
+                    "action_rejected",
+                    {
+                        "tool": action.tool,
+                        "reason": (
+                            "A plan must be created " "before tools can be used."
+                        ),
+                    },
+                )
+
+                continue
 
             mutation_tools = {
                 "write_file",
@@ -226,6 +357,7 @@ class PythonGPTAgent:
             if action.tool == "run_tests":
 
                 if not state.baseline_verification_run:
+
                     state.baseline_verification_run = True
 
                     state.baseline_verification_failed = not result.get(
@@ -237,11 +369,13 @@ class PythonGPTAgent:
                     "success",
                     False,
                 ):
+
                     state.verification_passed = True
 
                     state.changes_since_verification = False
 
                 else:
+
                     state.verification_passed = False
 
             elif (
@@ -271,9 +405,11 @@ class PythonGPTAgent:
                         "success",
                         False,
                     ):
+
                         state.passed_quality_checks.add(command)
 
                     else:
+
                         state.passed_quality_checks.discard(command)
 
         if not state.completed and state.iteration >= state.max_iterations:
