@@ -10,7 +10,10 @@ from app.agent.actions import (
 from app.agent.parser import parse_agent_action
 from app.agent.plan import PlanStep
 from app.agent.prompt import build_messages
-from app.agent.state import AgentState
+from app.agent.state import (
+    AgentState,
+    EventCallback,
+)
 from app.llm.base import LLMClient
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import Runtime
@@ -31,7 +34,9 @@ class PythonGPTAgent:
         llm: Optional[LLMClient] = None,
     ):
         self.workspace = Workspace(workspace_path)
+
         self.runtime = Runtime(workspace_path)
+
         self.terminal = ControlledTerminal(workspace_path)
 
         self.tools = ToolRegistry(
@@ -48,6 +53,7 @@ class PythonGPTAgent:
         mode: str = "general",
         required_quality_checks: set[str] | None = None,
         planning_required: bool = False,
+        event_callback: EventCallback | None = None,
     ) -> AgentState:
 
         return AgentState(
@@ -55,6 +61,7 @@ class PythonGPTAgent:
             mode=mode,
             planning_required=planning_required,
             required_quality_checks=set(required_quality_checks or ()),
+            event_callback=event_callback,
         )
 
     def execute_tool(
@@ -352,6 +359,7 @@ class PythonGPTAgent:
         mode: str = "general",
         required_quality_checks: set[str] | None = None,
         planning_required: bool = False,
+        event_callback: EventCallback | None = None,
     ) -> AgentState:
 
         if self.llm is None:
@@ -379,6 +387,7 @@ class PythonGPTAgent:
             mode=mode,
             required_quality_checks=checks,
             planning_required=planning_required,
+            event_callback=event_callback,
         )
 
         while not state.completed and state.iteration < state.max_iterations:
