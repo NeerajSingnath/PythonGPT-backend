@@ -13,6 +13,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from app.agent.agent import PythonGPTAgent
+from app.event_stream import EventStream
 from app.llm.nvidia import NvidiaLLMClient
 from app.run_store import RunStore
 from app.tools.workspace import Workspace
@@ -25,6 +26,7 @@ app = FastAPI(
 
 workspace_manager = WorkspaceManager()
 run_store = RunStore()
+event_stream = EventStream()
 
 RUN_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
@@ -160,6 +162,15 @@ async def execute_agent_run(
     try:
         run_store.mark_running(run_id)
 
+        event_stream.publish(
+            run_id,
+            {
+                "type": "run_started",
+                "run_id": run_id,
+                "workspace": workspace_name,
+            },
+        )
+
         workspace = workspace_manager.get_path(workspace_name)
 
         if not workspace.exists():
@@ -175,12 +186,26 @@ async def execute_agent_run(
             llm=llm,
         )
 
+        def on_agent_event(
+            event: dict,
+        ) -> None:
+
+            event_stream.publish(
+                run_id,
+                {
+                    "type": "agent_event",
+                    "run_id": run_id,
+                    "event": event,
+                },
+            )
+
         state = await asyncio.to_thread(
             agent.run,
             task,
             mode,
             required_quality_checks,
             planning_required,
+            on_agent_event,
         )
 
         run_store.complete(
@@ -188,10 +213,32 @@ async def execute_agent_run(
             state,
         )
 
+        event_stream.publish(
+            run_id,
+            {
+                "type": "run_completed",
+                "run_id": run_id,
+                "completed": state.completed,
+                "iterations": state.iteration,
+                "tests_verified": state.verification_passed,
+                "quality_checks": sorted(state.passed_quality_checks),
+            },
+        )
+
     except Exception as exc:
+
         run_store.fail(
             run_id,
             str(exc),
+        )
+
+        event_stream.publish(
+            run_id,
+            {
+                "type": "run_failed",
+                "run_id": run_id,
+                "error": str(exc),
+            },
         )
 
 
