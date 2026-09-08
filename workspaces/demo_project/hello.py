@@ -1,3 +1,3 @@
-def greet() -> str:
-    """Return a greeting for PythonGPT."""
-    return "Hello PythonGPT"
+def add():
+    return 10 / 0
+print(add())

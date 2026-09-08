@@ -447,6 +447,46 @@ async def write_workspace_file(
     )
 
 
+@app.delete(
+    "/workspaces/{name}/files/{file_path:path}",
+    response_model=FileWriteResponse,
+)
+async def delete_workspace_file(
+    name: str,
+    file_path: str,
+):
+    workspace_path = get_workspace_path(name)
+
+    workspace = Workspace(workspace_path)
+
+    try:
+        result = workspace.delete_file(file_path)
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if not result.get("success"):
+        error = result.get(
+            "error",
+            "Unable to delete file.",
+        )
+
+        status_code = 404 if "not found" in error.lower() else 400
+
+        raise HTTPException(
+            status_code=status_code,
+            detail=error,
+        )
+
+    return FileWriteResponse(
+        success=True,
+        path=result["path"],
+    )
+
+
 @app.post(
     "/workspaces/{name}/run",
     response_model=PythonRunResponse,
