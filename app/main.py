@@ -3,10 +3,6 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.config import CORS_ORIGINS
-
 from fastapi import (
     BackgroundTasks,
     FastAPI,
@@ -16,12 +12,15 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.agent.agent import PythonGPTAgent
+from app.config import CORS_ORIGINS
 from app.event_stream import EventStream
 from app.llm.nvidia import NvidiaLLMClient
 from app.run_store import RunStore
+from app.tools.runtime import Runtime
 from app.tools.workspace import Workspace
 from app.workspace_manager import WorkspaceManager
 
@@ -30,6 +29,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -37,6 +37,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 workspace_manager = WorkspaceManager()
 run_store = RunStore()
@@ -78,6 +79,26 @@ class FileListResponse(BaseModel):
 class FileWriteResponse(BaseModel):
     success: bool
     path: str
+
+
+class PythonRunRequest(BaseModel):
+    file: str = Field(
+        min_length=1,
+        max_length=1000,
+    )
+
+    timeout: int = Field(
+        default=10,
+        ge=1,
+        le=30,
+    )
+
+
+class PythonRunResponse(BaseModel):
+    success: bool
+    return_code: int
+    stdout: str
+    stderr: str
 
 
 class AgentRunRequest(BaseModel):
@@ -132,7 +153,6 @@ class AgentRunDetailResponse(AgentRunSummaryResponse):
 def get_workspace_path(
     name: str,
 ) -> Path:
-
     try:
         path = workspace_manager.get_path(name)
 
@@ -154,7 +174,6 @@ def get_workspace_path(
 def validate_run_id(
     run_id: str,
 ) -> str:
-
     if not RUN_ID_PATTERN.fullmatch(run_id):
         raise HTTPException(
             status_code=400,
@@ -172,7 +191,6 @@ async def execute_agent_run(
     planning_required: bool,
     required_quality_checks: set[str],
 ) -> None:
-
     try:
         run_store.mark_running(run_id)
 
@@ -188,7 +206,7 @@ async def execute_agent_run(
         workspace = workspace_manager.get_path(workspace_name)
 
         if not workspace.exists():
-            raise RuntimeError(f"Workspace not found: " f"{workspace_name}")
+            raise RuntimeError(f"Workspace not found: {workspace_name}")
 
         llm = NvidiaLLMClient(
             thinking=True,
@@ -203,7 +221,6 @@ async def execute_agent_run(
         def on_agent_event(
             event: dict,
         ) -> None:
-
             event_stream.publish(
                 run_id,
                 {
@@ -234,13 +251,12 @@ async def execute_agent_run(
                 "run_id": run_id,
                 "completed": state.completed,
                 "iterations": state.iteration,
-                "tests_verified": state.verification_passed,
+                "tests_verified": (state.verification_passed),
                 "quality_checks": sorted(state.passed_quality_checks),
             },
         )
 
     except Exception as exc:
-
         run_store.fail(
             run_id,
             str(exc),
@@ -269,7 +285,6 @@ async def health():
     response_model=list[WorkspaceResponse],
 )
 async def list_workspaces():
-
     return workspace_manager.list_workspaces()
 
 
@@ -281,7 +296,6 @@ async def list_workspaces():
 async def create_workspace(
     request: WorkspaceCreateRequest,
 ):
-
     try:
         path = workspace_manager.create(request.name)
 
@@ -310,7 +324,6 @@ async def create_workspace(
 async def delete_workspace(
     name: str,
 ):
-
     try:
         workspace_manager.delete(name)
 
@@ -334,7 +347,6 @@ async def delete_workspace(
 async def list_workspace_files(
     name: str,
 ):
-
     workspace_path = get_workspace_path(name)
 
     workspace = Workspace(workspace_path)
@@ -363,7 +375,6 @@ async def read_workspace_file(
     name: str,
     file_path: str,
 ):
-
     workspace_path = get_workspace_path(name)
 
     workspace = Workspace(workspace_path)
@@ -378,7 +389,6 @@ async def read_workspace_file(
         ) from exc
 
     if not result.get("success"):
-
         error = result.get(
             "error",
             "Unable to read file.",
@@ -406,7 +416,6 @@ async def write_workspace_file(
     file_path: str,
     request: FileWriteRequest,
 ):
-
     workspace_path = get_workspace_path(name)
 
     workspace = Workspace(workspace_path)
@@ -439,6 +448,48 @@ async def write_workspace_file(
 
 
 @app.post(
+    "/workspaces/{name}/run",
+    response_model=PythonRunResponse,
+)
+async def run_workspace_python(
+    name: str,
+    request: PythonRunRequest,
+):
+    workspace_path = get_workspace_path(name)
+
+    if not request.file.lower().endswith(".py"):
+        raise HTTPException(
+            status_code=400,
+            detail=("Only Python files can " "be executed."),
+        )
+
+    runtime = Runtime(workspace_path)
+
+    result = await asyncio.to_thread(
+        runtime.run_python,
+        request.file,
+        request.timeout,
+    )
+
+    if "error" in result:
+        error = result["error"]
+
+        status_code = 404 if "does not exist" in error.lower() else 400
+
+        raise HTTPException(
+            status_code=status_code,
+            detail=error,
+        )
+
+    return PythonRunResponse(
+        success=result["success"],
+        return_code=result["return_code"],
+        stdout=result["stdout"],
+        stderr=result["stderr"],
+    )
+
+
+@app.post(
     "/agent/runs",
     response_model=AgentRunCreateResponse,
     status_code=status.HTTP_202_ACCEPTED,
@@ -447,7 +498,6 @@ async def create_agent_run(
     request: AgentRunRequest,
     background_tasks: BackgroundTasks,
 ):
-
     get_workspace_path(request.workspace)
 
     if request.required_quality_checks - {"ruff", "mypy"}:
@@ -460,8 +510,8 @@ async def create_agent_run(
         workspace=request.workspace,
         task=request.task,
         mode=request.mode,
-        planning_required=request.planning_required,
-        required_quality_checks=request.required_quality_checks,
+        planning_required=(request.planning_required),
+        required_quality_checks=(request.required_quality_checks),
     )
 
     background_tasks.add_task(
@@ -491,7 +541,6 @@ async def list_agent_runs(
         le=100,
     ),
 ):
-
     runs = run_store.list_runs(limit=limit)
 
     return [
@@ -521,7 +570,6 @@ async def list_agent_runs(
 async def get_agent_run(
     run_id: str,
 ):
-
     validate_run_id(run_id)
 
     run = run_store.get(run_id)
@@ -558,12 +606,12 @@ async def stream_agent_run(
     websocket: WebSocket,
     run_id: str,
 ):
-
     if not RUN_ID_PATTERN.fullmatch(run_id):
         await websocket.close(
             code=1008,
             reason="Invalid run ID.",
         )
+
         return
 
     run = run_store.get(run_id)
@@ -573,6 +621,7 @@ async def stream_agent_run(
             code=1008,
             reason="Agent run not found.",
         )
+
         return
 
     await websocket.accept()
@@ -587,9 +636,10 @@ async def stream_agent_run(
                 {
                     "type": "run_failed",
                     "run_id": run_id,
-                    "error": "Agent run disappeared.",
+                    "error": ("Agent run disappeared."),
                 }
             )
+
             return
 
         await websocket.send_json(
@@ -607,7 +657,6 @@ async def stream_agent_run(
             return
 
         while True:
-
             event = await queue.get()
 
             await websocket.send_json(event)
