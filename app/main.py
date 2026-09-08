@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, status
@@ -6,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.agent import PythonGPTAgent
 from app.llm.nvidia import NvidiaLLMClient
+from app.tools.workspace import Workspace
 from app.workspace_manager import WorkspaceManager
 
 app = FastAPI(
@@ -30,6 +32,24 @@ class WorkspaceResponse(BaseModel):
 
 class WorkspaceCreateResponse(BaseModel):
     name: str
+    path: str
+
+
+class FileWriteRequest(BaseModel):
+    content: str
+
+
+class FileContentResponse(BaseModel):
+    path: str
+    content: str
+
+
+class FileListResponse(BaseModel):
+    files: list[str]
+
+
+class FileWriteResponse(BaseModel):
+    success: bool
     path: str
 
 
@@ -69,6 +89,28 @@ class AgentRunResponse(BaseModel):
     quality_checks: list[str]
     plan: list[PlanStepResponse]
     history: list[dict]
+
+
+def get_workspace_path(
+    name: str,
+) -> Path:
+
+    try:
+        path = workspace_manager.get_path(name)
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Workspace not found: {name}",
+        )
+
+    return path
 
 
 @app.get("/health")
@@ -142,6 +184,117 @@ async def delete_workspace(
         ) from exc
 
 
+@app.get(
+    "/workspaces/{name}/files",
+    response_model=FileListResponse,
+)
+async def list_workspace_files(
+    name: str,
+):
+
+    workspace_path = get_workspace_path(name)
+
+    workspace = Workspace(workspace_path)
+
+    result = workspace.list_files()
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=500,
+            detail=result.get(
+                "error",
+                "Unable to list files.",
+            ),
+        )
+
+    return FileListResponse(
+        files=result["files"],
+    )
+
+
+@app.get(
+    "/workspaces/{name}/files/{file_path:path}",
+    response_model=FileContentResponse,
+)
+async def read_workspace_file(
+    name: str,
+    file_path: str,
+):
+
+    workspace_path = get_workspace_path(name)
+
+    workspace = Workspace(workspace_path)
+
+    try:
+        result = workspace.read_file(file_path)
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if not result.get("success"):
+
+        error = result.get(
+            "error",
+            "Unable to read file.",
+        )
+
+        status_code = 404 if "not found" in error.lower() else 400
+
+        raise HTTPException(
+            status_code=status_code,
+            detail=error,
+        )
+
+    return FileContentResponse(
+        path=result["path"],
+        content=result["content"],
+    )
+
+
+@app.put(
+    "/workspaces/{name}/files/{file_path:path}",
+    response_model=FileWriteResponse,
+)
+async def write_workspace_file(
+    name: str,
+    file_path: str,
+    request: FileWriteRequest,
+):
+
+    workspace_path = get_workspace_path(name)
+
+    workspace = Workspace(workspace_path)
+
+    try:
+        result = workspace.write_file(
+            file_path,
+            request.content,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get(
+                "error",
+                "Unable to write file.",
+            ),
+        )
+
+    return FileWriteResponse(
+        success=True,
+        path=result["path"],
+    )
+
+
 @app.post(
     "/agent/run",
     response_model=AgentRunResponse,
@@ -150,20 +303,7 @@ async def run_agent(
     request: AgentRunRequest,
 ):
 
-    try:
-        workspace = workspace_manager.get_path(request.workspace)
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        ) from exc
-
-    if not workspace.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=(f"Workspace not found: " f"{request.workspace}"),
-        )
+    workspace = get_workspace_path(request.workspace)
 
     try:
         llm = NvidiaLLMClient(
