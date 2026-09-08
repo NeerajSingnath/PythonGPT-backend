@@ -3,6 +3,10 @@ import re
 from pathlib import Path
 from typing import Literal
 
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import CORS_ORIGINS
+
 from fastapi import (
     BackgroundTasks,
     FastAPI,
@@ -24,6 +28,14 @@ from app.workspace_manager import WorkspaceManager
 app = FastAPI(
     title="PythonGPT API",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 workspace_manager = WorkspaceManager()

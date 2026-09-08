@@ -184,6 +184,12 @@ class PythonGPTAgent:
 
             return True
 
+        if step.kind == "implementation":
+            return (
+                state.baseline_verification_run
+                and not state.baseline_verification_failed
+            )
+
         return False
 
     def _tool_can_complete_plan_step(
@@ -574,6 +580,25 @@ class PythonGPTAgent:
                 "edit_file",
                 "delete_file",
             }
+
+            if action.tool == "edit_file" and action.arguments.get(
+                "old_text"
+            ) == action.arguments.get("new_text"):
+                state.add_event(
+                    "action_rejected",
+                    {
+                        "tool": action.tool,
+                        "reason": (
+                            "No-op edits are not allowed. "
+                            "If baseline tests passed and no "
+                            "implementation changes are required, "
+                            "complete the implementation plan step "
+                            "without modifying files."
+                        ),
+                    },
+                )
+
+                continue
 
             if (
                 state.mode == "repair"
