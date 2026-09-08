@@ -1,5 +1,3 @@
-def main():
-    print("Hello PythonGPT")
-
-if __name__ == "__main__":
-    main()
+def greet() -> str:
+    """Return a greeting for PythonGPT."""
+    return "Hello PythonGPT"

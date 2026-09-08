@@ -8,6 +8,8 @@ from fastapi import (
     FastAPI,
     HTTPException,
     Query,
+    WebSocket,
+    WebSocketDisconnect,
     status,
 )
 from pydantic import BaseModel, Field
@@ -537,3 +539,78 @@ async def get_agent_run(
         plan=run["plan"],
         history=run["history"],
     )
+
+
+@app.websocket("/agent/runs/{run_id}/stream")
+async def stream_agent_run(
+    websocket: WebSocket,
+    run_id: str,
+):
+
+    if not RUN_ID_PATTERN.fullmatch(run_id):
+        await websocket.close(
+            code=1008,
+            reason="Invalid run ID.",
+        )
+        return
+
+    run = run_store.get(run_id)
+
+    if run is None:
+        await websocket.close(
+            code=1008,
+            reason="Agent run not found.",
+        )
+        return
+
+    await websocket.accept()
+
+    queue = event_stream.subscribe(run_id)
+
+    try:
+        current_run = run_store.get(run_id)
+
+        if current_run is None:
+            await websocket.send_json(
+                {
+                    "type": "run_failed",
+                    "run_id": run_id,
+                    "error": "Agent run disappeared.",
+                }
+            )
+            return
+
+        await websocket.send_json(
+            {
+                "type": "run_snapshot",
+                "run_id": run_id,
+                "run": current_run,
+            }
+        )
+
+        if current_run["status"] in {
+            "completed",
+            "failed",
+        }:
+            return
+
+        while True:
+
+            event = await queue.get()
+
+            await websocket.send_json(event)
+
+            if event.get("type") in {
+                "run_completed",
+                "run_failed",
+            }:
+                break
+
+    except WebSocketDisconnect:
+        pass
+
+    finally:
+        event_stream.unsubscribe(
+            run_id,
+            queue,
+        )

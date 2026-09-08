@@ -1,7 +1,5 @@
-import hello
+from hello import greet
 
 
-def test_hello(capsys):
-    hello.main()
-    captured = capsys.readouterr()
-    assert captured.out.strip() == "Hello PythonGPT"
+def test_greet():
+    assert greet() == "Hello PythonGPT"
