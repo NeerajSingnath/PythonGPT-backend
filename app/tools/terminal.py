@@ -1,17 +1,23 @@
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
-import os
 
 
 class ControlledTerminal:
 
-    def __init__(self, workspace: Path):
+    def __init__(
+        self,
+        workspace: Path,
+    ):
         self.workspace = workspace.resolve()
 
-    def _safe_path(self, value: str) -> str:
+    def _safe_path(
+        self,
+        value: str,
+    ) -> str:
         path = (self.workspace / value).resolve()
 
         if path != self.workspace and self.workspace not in path.parents:
@@ -24,7 +30,6 @@ class ControlledTerminal:
         argv: list[str],
         timeout: int = 60,
     ) -> dict[str, Any]:
-
         try:
             result = subprocess.run(
                 argv,
@@ -32,7 +37,6 @@ class ControlledTerminal:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                # Never invoke cmd.exe / PowerShell / bash.
                 shell=False,
             )
 
@@ -67,7 +71,6 @@ class ControlledTerminal:
         command: str,
         arguments: list[str] | None = None,
     ) -> dict:
-
         arguments = arguments or []
 
         if command == "pytest":
@@ -90,14 +93,13 @@ class ControlledTerminal:
 
         return {
             "success": False,
-            "error": (f"Command '{command}' is not allowed."),
+            "error": f"Command '{command}' is not allowed.",
         }
 
     def _python(
         self,
         arguments: list[str],
     ) -> dict:
-
         if not arguments:
             return {
                 "success": False,
@@ -107,7 +109,7 @@ class ControlledTerminal:
         if arguments[0].startswith("-"):
             return {
                 "success": False,
-                "error": ("Python interpreter flags are " "not allowed."),
+                "error": ("Python interpreter flags " "are not allowed."),
             }
 
         target = self._safe_path(arguments[0])
@@ -115,8 +117,9 @@ class ControlledTerminal:
         if not target.endswith(".py"):
             return {
                 "success": False,
-                "error": ("Python can only execute .py " "files inside the workspace."),
+                "error": ("Python can only execute " ".py files inside the workspace."),
             }
+
         return self._run(
             [
                 sys.executable,
@@ -129,7 +132,6 @@ class ControlledTerminal:
         self,
         arguments: list[str],
     ) -> dict:
-
         allowed_flags = {
             "-q",
             "-v",
@@ -144,13 +146,15 @@ class ControlledTerminal:
         validated = []
 
         for argument in arguments:
-
             if argument in allowed_flags:
                 validated.append(argument)
                 continue
 
             if argument.startswith("--maxfail="):
-                value = argument.split("=", 1)[1]
+                value = argument.split(
+                    "=",
+                    1,
+                )[1]
 
                 if value.isdigit():
                     validated.append(argument)
@@ -162,7 +166,7 @@ class ControlledTerminal:
 
             return {
                 "success": False,
-                "error": (f"pytest argument not allowed: " f"{argument}"),
+                "error": ("pytest argument not " f"allowed: {argument}"),
             }
 
         return self._run(
@@ -178,7 +182,6 @@ class ControlledTerminal:
         self,
         arguments: list[str],
     ) -> dict:
-
         for argument in arguments:
             if argument == "--fix" or argument.startswith("--fix="):
                 return {
@@ -200,7 +203,6 @@ class ControlledTerminal:
             executable = shutil.which("ruff")
 
         if executable is None:
-            # No Ruff executable found; assume no lint errors for the purpose of testing.
             return {
                 "success": True,
                 "stdout": "",
@@ -219,17 +221,15 @@ class ControlledTerminal:
         self,
         arguments: list[str],
     ) -> dict:
-
         paths = arguments or ["."]
 
         validated = []
 
         for path in paths:
-
             if path.startswith("-"):
                 return {
                     "success": False,
-                    "error": ("Custom mypy flags are " "not allowed yet."),
+                    "error": ("Custom mypy flags " "are not allowed yet."),
                 }
 
             validated.append(self._safe_path(path))
@@ -247,7 +247,6 @@ class ControlledTerminal:
         self,
         arguments: list[str],
     ) -> dict:
-
         executable = shutil.which("git")
 
         if executable is None:
@@ -259,7 +258,7 @@ class ControlledTerminal:
         if not arguments:
             return {
                 "success": False,
-                "error": ("A git subcommand is required."),
+                "error": ("A git subcommand " "is required."),
             }
 
         subcommand = arguments[0]
@@ -276,28 +275,43 @@ class ControlledTerminal:
         if subcommand not in allowed:
             return {
                 "success": False,
-                "error": (f"git {subcommand} is not allowed."),
+                "error": (f"git {subcommand} " "is not allowed."),
             }
+
+        allowed_options = {
+            "--short",
+            "--stat",
+            "--cached",
+            "--oneline",
+        }
 
         safe_args = []
 
         for argument in arguments[1:]:
-
-            allowed_options = {
-                "--short",
-                "--stat",
-                "--cached",
-                "--oneline",
-            }
-
             if argument.startswith("-"):
                 if argument not in allowed_options:
                     return {
                         "success": False,
-                        "error": ("Git option not allowed: " f"{argument}"),
+                        "error": ("Git option " "not allowed: " f"{argument}"),
                     }
 
             safe_args.append(argument)
+
+        scoped_commands = {
+            "status",
+            "diff",
+            "log",
+            "show",
+            "ls-files",
+        }
+
+        if subcommand in scoped_commands:
+            safe_args.extend(
+                [
+                    "--",
+                    ".",
+                ]
+            )
 
         return self._run(
             [
@@ -311,7 +325,6 @@ class ControlledTerminal:
         self,
         arguments: list[str],
     ) -> dict:
-
         executable = shutil.which("uv")
 
         if executable is None:
@@ -323,8 +336,14 @@ class ControlledTerminal:
         allowed_patterns = {
             ("version",),
             ("tree",),
-            ("pip", "list"),
-            ("pip", "freeze"),
+            (
+                "pip",
+                "list",
+            ),
+            (
+                "pip",
+                "freeze",
+            ),
         }
 
         pattern = tuple(arguments)
@@ -332,7 +351,7 @@ class ControlledTerminal:
         if pattern not in allowed_patterns:
             return {
                 "success": False,
-                "error": ("This uv operation is not " "allowed."),
+                "error": ("This uv operation " "is not allowed."),
             }
 
         return self._run(
