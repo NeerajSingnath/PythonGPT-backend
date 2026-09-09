@@ -12,6 +12,7 @@ from app.agent.plan import PlanStep
 from app.agent.prompt import build_messages
 from app.agent.state import (
     AgentState,
+    CancellationCheck,
     EventCallback,
 )
 from app.llm.base import LLMClient
@@ -55,7 +56,6 @@ class PythonGPTAgent:
         planning_required: bool = False,
         event_callback: EventCallback | None = None,
     ) -> AgentState:
-
         return AgentState(
             task=task,
             mode=mode,
@@ -70,7 +70,6 @@ class PythonGPTAgent:
         tool: str,
         arguments: dict,
     ) -> dict:
-
         state.iteration += 1
 
         result = self.tools.execute(
@@ -89,21 +88,62 @@ class PythonGPTAgent:
 
         return result
 
+    def _cancel_if_requested(
+        self,
+        state: AgentState,
+        cancellation_check: CancellationCheck | None,
+    ) -> bool:
+        if state.cancelled:
+            return True
+
+        if cancellation_check is None:
+            return False
+
+        try:
+            requested = bool(cancellation_check())
+
+        except Exception as exc:
+            state.add_event(
+                "cancellation_check_failed",
+                {
+                    "error": str(exc),
+                },
+            )
+
+            return False
+
+        if not requested:
+            return False
+
+        state.cancelled = True
+
+        state.add_event(
+            "cancelled",
+            {
+                "reason": ("Cancellation requested."),
+            },
+        )
+
+        return True
+
     def _create_plan(
         self,
         state: AgentState,
         steps: list[str | PlanStepSpec],
     ) -> None:
-
         plan = []
 
         for index, step in enumerate(
             steps,
             start=1,
         ):
-            if isinstance(step, str):
+            if isinstance(
+                step,
+                str,
+            ):
                 description = step
                 kind = "general"
+
             else:
                 description = step.description
                 kind = step.kind
@@ -128,7 +168,6 @@ class PythonGPTAgent:
         state: AgentState,
         step_id: int,
     ) -> PlanStep | None:
-
         for step in state.plan:
             if step.id == step_id:
                 return step
@@ -142,7 +181,6 @@ class PythonGPTAgent:
         status: str,
         note: str | None = None,
     ) -> bool:
-
         step = self._get_plan_step(
             state,
             step_id,
@@ -153,7 +191,7 @@ class PythonGPTAgent:
                 "plan_update_rejected",
                 {
                     "step_id": step_id,
-                    "reason": "Unknown plan step.",
+                    "reason": ("Unknown plan step."),
                 },
             )
 
@@ -164,7 +202,7 @@ class PythonGPTAgent:
 
         state.add_event(
             "plan_updated",
-            {"step": step.model_dump()},
+            {"step": (step.model_dump())},
         )
 
         return True
@@ -174,7 +212,6 @@ class PythonGPTAgent:
         state: AgentState,
         step: PlanStep,
     ) -> bool:
-
         if step.kind == "general":
             return True
 
@@ -198,7 +235,6 @@ class PythonGPTAgent:
         action,
         result: dict,
     ) -> bool:
-
         mode = action.complete_plan_step_on
 
         success = result.get(
@@ -207,7 +243,6 @@ class PythonGPTAgent:
         )
 
         if step.kind == "general":
-
             if mode == "tool_success":
                 return success
 
@@ -217,7 +252,6 @@ class PythonGPTAgent:
             return False
 
         if step.kind == "inspection":
-
             return (
                 mode == "tool_success"
                 and success
@@ -231,7 +265,6 @@ class PythonGPTAgent:
             )
 
         if step.kind == "baseline_test":
-
             return (
                 mode == "tool_execution"
                 and action.tool == "run_tests"
@@ -242,7 +275,6 @@ class PythonGPTAgent:
             return False
 
         if step.kind == "implementation":
-
             return (
                 mode == "tool_success"
                 and success
@@ -255,7 +287,6 @@ class PythonGPTAgent:
             )
 
         if step.kind == "quality_check":
-
             if mode != "tool_success" or not success or action.tool != "run_command":
                 return False
 
@@ -267,11 +298,9 @@ class PythonGPTAgent:
             }
 
         if step.kind == "verification":
-
             return mode == "tool_success" and success and action.tool == "run_tests"
 
         if step.kind == "review":
-
             if mode != "tool_success" or not success or action.tool != "run_command":
                 return False
 
@@ -303,7 +332,6 @@ class PythonGPTAgent:
         action,
         result: dict,
     ) -> None:
-
         if action.plan_step_id is None:
             return
 
@@ -319,8 +347,8 @@ class PythonGPTAgent:
             state.add_event(
                 "plan_update_rejected",
                 {
-                    "step_id": action.plan_step_id,
-                    "reason": "Unknown plan step.",
+                    "step_id": (action.plan_step_id),
+                    "reason": ("Unknown plan step."),
                 },
             )
 
@@ -366,8 +394,8 @@ class PythonGPTAgent:
         required_quality_checks: set[str] | None = None,
         planning_required: bool = False,
         event_callback: EventCallback | None = None,
+        cancellation_check: CancellationCheck | None = None,
     ) -> AgentState:
-
         if self.llm is None:
             raise RuntimeError(
                 "An LLM client is required to " "run the autonomous agent."
@@ -396,7 +424,16 @@ class PythonGPTAgent:
             event_callback=event_callback,
         )
 
-        while not state.completed and state.iteration < state.max_iterations:
+        while (
+            not state.completed
+            and not state.cancelled
+            and state.iteration < state.max_iterations
+        ):
+            if self._cancel_if_requested(
+                state,
+                cancellation_check,
+            ):
+                break
 
             state.iteration += 1
 
@@ -407,6 +444,12 @@ class PythonGPTAgent:
 
             raw_response = self.llm.complete(messages)
 
+            if self._cancel_if_requested(
+                state,
+                cancellation_check,
+            ):
+                break
+
             state.add_event(
                 "llm_response",
                 raw_response,
@@ -416,22 +459,26 @@ class PythonGPTAgent:
                 action = parse_agent_action(raw_response)
 
             except Exception as exc:
-
                 state.add_event(
                     "invalid_action",
                     {
                         "error": str(exc),
-                        "response": raw_response,
+                        "response": (raw_response),
                     },
                 )
 
                 continue
 
+            if self._cancel_if_requested(
+                state,
+                cancellation_check,
+            ):
+                break
+
             if isinstance(
                 action,
                 PlanAction,
             ):
-
                 self._create_plan(
                     state=state,
                     steps=action.steps,
@@ -443,11 +490,10 @@ class PythonGPTAgent:
                 action,
                 PlanStepAction,
             ):
-
                 if not state.plan:
                     state.add_event(
                         "plan_update_rejected",
-                        {"reason": "No plan exists yet."},
+                        {"reason": ("No plan exists yet.")},
                     )
 
                     continue
@@ -461,8 +507,8 @@ class PythonGPTAgent:
                     state.add_event(
                         "plan_update_rejected",
                         {
-                            "step_id": action.step_id,
-                            "reason": "Unknown plan step.",
+                            "step_id": (action.step_id),
+                            "reason": ("Unknown plan step."),
                         },
                     )
 
@@ -493,8 +539,8 @@ class PythonGPTAgent:
 
                 self._update_plan_step(
                     state=state,
-                    step_id=action.step_id,
-                    status=action.status,
+                    step_id=(action.step_id),
+                    status=(action.status),
                     note=action.note,
                 )
 
@@ -504,7 +550,6 @@ class PythonGPTAgent:
                 action,
                 FinishAction,
             ):
-
                 missing_quality_checks = (
                     state.required_quality_checks - state.passed_quality_checks
                 )
@@ -522,7 +567,6 @@ class PythonGPTAgent:
                     or plan_missing
                     or (state.planning_required and incomplete_plan_steps)
                 ):
-
                     state.add_event(
                         "finish_rejected",
                         {
@@ -531,16 +575,18 @@ class PythonGPTAgent:
                                 "or planning has not "
                                 "been completed."
                             ),
-                            "tests_passed": state.verification_passed,
-                            "changes_since_verification": state.changes_since_verification,
-                            "missing_quality_checks": sorted(missing_quality_checks),
-                            "plan_missing": plan_missing,
+                            "tests_passed": (state.verification_passed),
+                            "changes_since_verification": (
+                                state.changes_since_verification
+                            ),
+                            "missing_quality_checks": (sorted(missing_quality_checks)),
+                            "plan_missing": (plan_missing),
                             "incomplete_plan_steps": [
                                 {
                                     "id": step.id,
                                     "kind": step.kind,
-                                    "description": step.description,
-                                    "status": step.status,
+                                    "description": (step.description),
+                                    "status": (step.status),
                                 }
                                 for step in incomplete_plan_steps
                             ],
@@ -554,15 +600,14 @@ class PythonGPTAgent:
                 state.add_event(
                     "finished",
                     {
-                        "reasoning": action.reasoning,
-                        "summary": action.summary,
+                        "reasoning": (action.reasoning),
+                        "summary": (action.summary),
                     },
                 )
 
                 break
 
             if state.planning_required and not state.plan:
-
                 state.add_event(
                     "action_rejected",
                     {
@@ -605,7 +650,6 @@ class PythonGPTAgent:
                 and action.tool in mutation_tools
                 and not state.baseline_verification_run
             ):
-
                 state.add_event(
                     "action_rejected",
                     {
@@ -620,6 +664,12 @@ class PythonGPTAgent:
 
                 continue
 
+            if self._cancel_if_requested(
+                state,
+                cancellation_check,
+            ):
+                break
+
             result = self.tools.execute(
                 action.tool,
                 action.arguments,
@@ -629,15 +679,13 @@ class PythonGPTAgent:
                 "tool_result",
                 {
                     "tool": action.tool,
-                    "arguments": action.arguments,
+                    "arguments": (action.arguments),
                     "result": result,
                 },
             )
 
             if action.tool == "run_tests":
-
                 if not state.baseline_verification_run:
-
                     state.baseline_verification_run = True
 
                     state.baseline_verification_failed = not result.get(
@@ -649,13 +697,11 @@ class PythonGPTAgent:
                     "success",
                     False,
                 ):
-
                     state.verification_passed = True
 
                     state.changes_since_verification = False
 
                 else:
-
                     state.verification_passed = False
 
             elif (
@@ -665,7 +711,6 @@ class PythonGPTAgent:
                 )
                 and action.tool in mutation_tools
             ):
-
                 state.changes_since_verification = True
 
                 state.verification_passed = False
@@ -673,23 +718,19 @@ class PythonGPTAgent:
                 state.passed_quality_checks.clear()
 
             if action.tool == "run_command":
-
                 command = action.arguments.get("command")
 
                 if command in {
                     "ruff",
                     "mypy",
                 }:
-
                     if result.get(
                         "success",
                         False,
                     ):
-
                         state.passed_quality_checks.add(command)
 
                     else:
-
                         state.passed_quality_checks.discard(command)
 
             self._complete_plan_step_from_tool(
@@ -698,12 +739,15 @@ class PythonGPTAgent:
                 result=result,
             )
 
-        if not state.completed and state.iteration >= state.max_iterations:
-
+        if (
+            not state.completed
+            and not state.cancelled
+            and state.iteration >= state.max_iterations
+        ):
             state.add_event(
                 "max_iterations_reached",
                 {
-                    "max_iterations": state.max_iterations,
+                    "max_iterations": (state.max_iterations),
                 },
             )
 

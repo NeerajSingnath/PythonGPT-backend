@@ -9,6 +9,11 @@ EventCallback = Callable[
     None,
 ]
 
+CancellationCheck = Callable[
+    [],
+    bool,
+]
+
 
 @dataclass
 class AgentState:
@@ -20,7 +25,9 @@ class AgentState:
 
     iteration: int = 0
     max_iterations: int = 50
+
     completed: bool = False
+    cancelled: bool = False
 
     mode: str = "general"
     planning_required: bool = False
@@ -46,7 +53,6 @@ class AgentState:
         event_type: str,
         data: Any,
     ) -> None:
-
         event = {
             "iteration": self.iteration,
             "type": event_type,

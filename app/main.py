@@ -21,6 +21,7 @@ from app.event_stream import EventStream
 from app.llm.nvidia import NvidiaLLMClient
 from app.run_store import RunStore
 from app.tools.runtime import Runtime
+from app.tools.terminal import ControlledTerminal
 from app.tools.workspace import Workspace
 from app.workspace_manager import WorkspaceManager
 
@@ -101,6 +102,12 @@ class PythonRunResponse(BaseModel):
     stderr: str
 
 
+class GitDiffResponse(BaseModel):
+    success: bool
+    status: str
+    diff: str
+
+
 class AgentRunRequest(BaseModel):
     task: str = Field(
         min_length=1,
@@ -165,7 +172,7 @@ def get_workspace_path(
     if not path.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Workspace not found: {name}",
+            detail=(f"Workspace not found: {name}"),
         )
 
     return path
@@ -181,6 +188,13 @@ def validate_run_id(
         )
 
     return run_id
+
+
+def get_terminal_error(
+    result: dict,
+    fallback: str,
+) -> str:
+    return (result.get("error") or result.get("stderr") or fallback).strip()
 
 
 async def execute_agent_run(
@@ -249,8 +263,8 @@ async def execute_agent_run(
             {
                 "type": "run_completed",
                 "run_id": run_id,
-                "completed": state.completed,
-                "iterations": state.iteration,
+                "completed": (state.completed),
+                "iterations": (state.iteration),
                 "tests_verified": (state.verification_passed),
                 "quality_checks": sorted(state.passed_quality_checks),
             },
@@ -529,6 +543,95 @@ async def run_workspace_python(
     )
 
 
+@app.get(
+    "/workspaces/{name}/diff",
+    response_model=GitDiffResponse,
+)
+async def get_workspace_diff(
+    name: str,
+):
+    workspace_path = get_workspace_path(name)
+
+    terminal = ControlledTerminal(workspace_path)
+
+    status_result = await asyncio.to_thread(
+        terminal.run_command,
+        "git",
+        [
+            "status",
+            "--short",
+        ],
+    )
+
+    if not status_result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=get_terminal_error(
+                status_result,
+                "Unable to read Git status.",
+            ),
+        )
+
+    diff_result = await asyncio.to_thread(
+        terminal.run_command,
+        "git",
+        [
+            "diff",
+        ],
+    )
+
+    if not diff_result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=get_terminal_error(
+                diff_result,
+                "Unable to read Git diff.",
+            ),
+        )
+
+    cached_result = await asyncio.to_thread(
+        terminal.run_command,
+        "git",
+        [
+            "diff",
+            "--cached",
+        ],
+    )
+
+    if not cached_result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=get_terminal_error(
+                cached_result,
+                ("Unable to read " "staged Git diff."),
+            ),
+        )
+
+    diff_parts = [
+        part.rstrip()
+        for part in [
+            diff_result.get(
+                "stdout",
+                "",
+            ),
+            cached_result.get(
+                "stdout",
+                "",
+            ),
+        ]
+        if part.strip()
+    ]
+
+    return GitDiffResponse(
+        success=True,
+        status=status_result.get(
+            "stdout",
+            "",
+        ),
+        diff="\n".join(diff_parts),
+    )
+
+
 @app.post(
     "/agent/runs",
     response_model=AgentRunCreateResponse,
@@ -543,7 +646,7 @@ async def create_agent_run(
     if request.required_quality_checks - {"ruff", "mypy"}:
         raise HTTPException(
             status_code=400,
-            detail=("Supported quality checks are " "ruff and mypy."),
+            detail=("Supported quality checks " "are ruff and mypy."),
         )
 
     run = run_store.create(
