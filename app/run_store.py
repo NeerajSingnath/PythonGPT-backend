@@ -33,7 +33,6 @@ class RunStore:
         self,
         run: dict[str, Any],
     ) -> None:
-
         path = self._path(run["id"])
 
         temporary = path.with_suffix(".tmp")
@@ -58,7 +57,6 @@ class RunStore:
         planning_required: bool,
         required_quality_checks: set[str],
     ) -> dict[str, Any]:
-
         run_id = uuid4().hex
 
         run = {
@@ -73,6 +71,8 @@ class RunStore:
             "started_at": None,
             "finished_at": None,
             "completed": False,
+            "cancelled": False,
+            "cancellation_requested": False,
             "iterations": 0,
             "tests_verified": False,
             "quality_checks": [],
@@ -90,7 +90,6 @@ class RunStore:
         self,
         run_id: str,
     ) -> dict[str, Any] | None:
-
         path = self._path(run_id)
 
         if not path.exists():
@@ -99,6 +98,7 @@ class RunStore:
         with self._lock:
             try:
                 return json.loads(path.read_text(encoding="utf-8"))
+
             except (
                 json.JSONDecodeError,
                 OSError,
@@ -109,12 +109,12 @@ class RunStore:
         self,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-
         runs = []
 
         for path in self.root.glob("*.json"):
             try:
                 run = json.loads(path.read_text(encoding="utf-8"))
+
             except (
                 json.JSONDecodeError,
                 OSError,
@@ -137,7 +137,6 @@ class RunStore:
         self,
         run_id: str,
     ) -> dict[str, Any]:
-
         with self._lock:
             run = self.get(run_id)
 
@@ -145,18 +144,58 @@ class RunStore:
                 raise KeyError(f"Run not found: {run_id}")
 
             run["status"] = "running"
+
             run["started_at"] = self._now()
 
             self._write(run)
 
         return run
 
+    def request_cancellation(
+        self,
+        run_id: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            run = self.get(run_id)
+
+            if run is None:
+                raise KeyError(f"Run not found: {run_id}")
+
+            if run.get("status") in {
+                "completed",
+                "failed",
+                "cancelled",
+            }:
+                return run
+
+            run["cancellation_requested"] = True
+
+            self._write(run)
+
+        return run
+
+    def is_cancellation_requested(
+        self,
+        run_id: str,
+    ) -> bool:
+        with self._lock:
+            run = self.get(run_id)
+
+            if run is None:
+                return False
+
+            return bool(
+                run.get(
+                    "cancellation_requested",
+                    False,
+                )
+            )
+
     def complete(
         self,
         run_id: str,
         state,
     ) -> dict[str, Any]:
-
         with self._lock:
             run = self.get(run_id)
 
@@ -164,10 +203,53 @@ class RunStore:
                 raise KeyError(f"Run not found: {run_id}")
 
             run["status"] = "completed"
+
             run["finished_at"] = self._now()
+
             run["completed"] = state.completed
+
+            run["cancelled"] = False
+
             run["iterations"] = state.iteration
+
             run["tests_verified"] = state.verification_passed
+
+            run["quality_checks"] = sorted(state.passed_quality_checks)
+
+            run["plan"] = [step.model_dump() for step in state.plan]
+
+            run["history"] = state.history
+
+            run["error"] = None
+
+            self._write(run)
+
+        return run
+
+    def cancel(
+        self,
+        run_id: str,
+        state,
+    ) -> dict[str, Any]:
+        with self._lock:
+            run = self.get(run_id)
+
+            if run is None:
+                raise KeyError(f"Run not found: {run_id}")
+
+            run["status"] = "cancelled"
+
+            run["finished_at"] = self._now()
+
+            run["completed"] = False
+            run["cancelled"] = True
+
+            run["cancellation_requested"] = True
+
+            run["iterations"] = state.iteration
+
+            run["tests_verified"] = state.verification_passed
+
             run["quality_checks"] = sorted(state.passed_quality_checks)
 
             run["plan"] = [step.model_dump() for step in state.plan]
@@ -185,7 +267,6 @@ class RunStore:
         run_id: str,
         error: str,
     ) -> dict[str, Any]:
-
         with self._lock:
             run = self.get(run_id)
 
@@ -193,8 +274,11 @@ class RunStore:
                 raise KeyError(f"Run not found: {run_id}")
 
             run["status"] = "failed"
+
             run["finished_at"] = self._now()
+
             run["completed"] = False
+            run["cancelled"] = False
             run["error"] = error
 
             self._write(run)
