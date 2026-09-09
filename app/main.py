@@ -134,6 +134,12 @@ class AgentRunCreateResponse(BaseModel):
     status: str
 
 
+class AgentRunCancelResponse(BaseModel):
+    id: str
+    status: str
+    cancellation_requested: bool
+
+
 class AgentRunSummaryResponse(BaseModel):
     id: str
     workspace: str
@@ -244,6 +250,9 @@ async def execute_agent_run(
                 },
             )
 
+        def cancellation_check() -> bool:
+            return run_store.is_cancellation_requested(run_id)
+
         state = await asyncio.to_thread(
             agent.run,
             task,
@@ -251,7 +260,26 @@ async def execute_agent_run(
             required_quality_checks,
             planning_required,
             on_agent_event,
+            cancellation_check,
         )
+
+        if state.cancelled:
+            run_store.cancel(
+                run_id,
+                state,
+            )
+
+            event_stream.publish(
+                run_id,
+                {
+                    "type": "run_cancelled",
+                    "run_id": run_id,
+                    "cancelled": True,
+                    "iterations": state.iteration,
+                },
+            )
+
+            return
 
         run_store.complete(
             run_id,
@@ -673,6 +701,57 @@ async def create_agent_run(
     )
 
 
+@app.post(
+    "/agent/runs/{run_id}/cancel",
+    response_model=AgentRunCancelResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_agent_run(
+    run_id: str,
+):
+    validate_run_id(run_id)
+
+    run = run_store.get(run_id)
+
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent run not found.",
+        )
+
+    if run["status"] in {
+        "completed",
+        "failed",
+        "cancelled",
+    }:
+        return AgentRunCancelResponse(
+            id=run["id"],
+            status=run["status"],
+            cancellation_requested=bool(
+                run.get(
+                    "cancellation_requested",
+                    False,
+                )
+            ),
+        )
+
+    run = run_store.request_cancellation(run_id)
+
+    event_stream.publish(
+        run_id,
+        {
+            "type": "cancellation_requested",
+            "run_id": run_id,
+        },
+    )
+
+    return AgentRunCancelResponse(
+        id=run["id"],
+        status=run["status"],
+        cancellation_requested=True,
+    )
+
+
 @app.get(
     "/agent/runs",
     response_model=list[AgentRunSummaryResponse],
@@ -796,6 +875,7 @@ async def stream_agent_run(
         if current_run["status"] in {
             "completed",
             "failed",
+            "cancelled",
         }:
             return
 
@@ -807,6 +887,7 @@ async def stream_agent_run(
             if event.get("type") in {
                 "run_completed",
                 "run_failed",
+                "run_cancelled",
             }:
                 break
 

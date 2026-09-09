@@ -1,0 +1,31 @@
+{
+  "id": "24cc541392aa410d8dcc8ee219c331fd",
+  "workspace": "broken_calculator",
+  "task": "Inspect this project, run the tests, identify any issues, and improve the code while preserving behavior.",
+  "mode": "general",
+  "status": "cancelled",
+  "planning_required": true,
+  "required_quality_checks": [
+    "ruff"
+  ],
+  "created_at": "2026-09-09T12:27:04.211226+00:00",
+  "started_at": "2026-09-09T12:27:04.224165+00:00",
+  "finished_at": "2026-09-09T12:27:45.513374+00:00",
+  "completed": false,
+  "cancelled": true,
+  "cancellation_requested": true,
+  "iterations": 1,
+  "tests_verified": false,
+  "quality_checks": [],
+  "plan": [],
+  "history": [
+    {
+      "iteration": 1,
+      "type": "cancelled",
+      "data": {
+        "reason": "Cancellation requested."
+      }
+    }
+  ],
+  "error": null
+}
