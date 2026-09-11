@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from app.tools.runtime import Runtime
+
 
 class ControlledTerminal:
 
@@ -14,6 +16,8 @@ class ControlledTerminal:
     ):
         self.workspace = workspace.resolve()
 
+        self.runtime = Runtime(workspace)
+
     def _safe_path(
         self,
         value: str,
@@ -22,6 +26,17 @@ class ControlledTerminal:
 
         if path != self.workspace and self.workspace not in path.parents:
             raise ValueError(f"Path escapes workspace: {value}")
+
+        return str(path)
+
+    def _runtime_path(
+        self,
+        value: str,
+    ) -> str:
+        path = Path(self._safe_path(value))
+
+        if self.runtime.mode == "docker":
+            return path.relative_to(self.workspace).as_posix()
 
         return str(path)
 
@@ -93,7 +108,7 @@ class ControlledTerminal:
 
         return {
             "success": False,
-            "error": f"Command '{command}' is not allowed.",
+            "error": (f"Command '{command}' " "is not allowed."),
         }
 
     def _python(
@@ -112,18 +127,49 @@ class ControlledTerminal:
                 "error": ("Python interpreter flags " "are not allowed."),
             }
 
-        target = self._safe_path(arguments[0])
+        try:
+            target = Path(self._safe_path(arguments[0]))
 
-        if not target.endswith(".py"):
+        except ValueError as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+            }
+
+        if target.suffix.lower() != ".py":
             return {
                 "success": False,
                 "error": ("Python can only execute " ".py files inside the workspace."),
             }
 
+        if not target.exists():
+            return {
+                "success": False,
+                "error": (f"{arguments[0]} " "does not exist"),
+            }
+
+        if not target.is_file():
+            return {
+                "success": False,
+                "error": (f"{arguments[0]} " "is not a file"),
+            }
+
+        if self.runtime.mode == "docker":
+            relative_target = target.relative_to(self.workspace).as_posix()
+
+            return self.runtime._execute(
+                [
+                    relative_target,
+                    *arguments[1:],
+                ],
+                timeout=60,
+                timeout_message=("Execution timed out."),
+            )
+
         return self._run(
             [
                 sys.executable,
-                target,
+                str(target),
                 *arguments[1:],
             ]
         )
@@ -148,6 +194,7 @@ class ControlledTerminal:
         for argument in arguments:
             if argument in allowed_flags:
                 validated.append(argument)
+
                 continue
 
             if argument.startswith("--maxfail="):
@@ -158,16 +205,36 @@ class ControlledTerminal:
 
                 if value.isdigit():
                     validated.append(argument)
+
                     continue
 
             if not argument.startswith("-"):
-                validated.append(self._safe_path(argument))
+                try:
+                    validated.append(self._runtime_path(argument))
+
+                except ValueError as exc:
+                    return {
+                        "success": False,
+                        "error": str(exc),
+                    }
+
                 continue
 
             return {
                 "success": False,
-                "error": ("pytest argument not " f"allowed: {argument}"),
+                "error": ("pytest argument " "not allowed: " f"{argument}"),
             }
+
+        if self.runtime.mode == "docker":
+            return self.runtime.run_module(
+                "pytest",
+                [
+                    "-p",
+                    "no:cacheprovider",
+                    *validated,
+                ],
+                timeout=60,
+            )
 
         return self._run(
             [
@@ -193,12 +260,24 @@ class ControlledTerminal:
                     ),
                 }
 
+        if self.runtime.mode == "docker":
+            return self.runtime.run_module(
+                "ruff",
+                [
+                    "check",
+                    "--no-cache",
+                    ".",
+                ],
+                timeout=60,
+            )
+
         executable_name = "ruff.exe" if os.name == "nt" else "ruff"
 
         executable_path = Path(sys.executable).parent / executable_name
 
         if executable_path.exists():
             executable = str(executable_path)
+
         else:
             executable = shutil.which("ruff")
 
@@ -232,7 +311,24 @@ class ControlledTerminal:
                     "error": ("Custom mypy flags " "are not allowed yet."),
                 }
 
-            validated.append(self._safe_path(path))
+            try:
+                validated.append(self._runtime_path(path))
+
+            except ValueError as exc:
+                return {
+                    "success": False,
+                    "error": str(exc),
+                }
+
+        if self.runtime.mode == "docker":
+            return self.runtime.run_module(
+                "mypy",
+                [
+                    "--cache-dir=/tmp/mypy_cache",
+                    *validated,
+                ],
+                timeout=60,
+            )
 
         return self._run(
             [
