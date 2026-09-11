@@ -367,3 +367,38 @@ def test_approved_modules_execute_through_docker(
     assert command[python_index + 2] == "-m"
 
     assert command[python_index + 3] == module
+
+
+def test_workspace_volume_mount_is_read_only(
+    tmp_path,
+    monkeypatch,
+):
+    workspace = tmp_path / "broken_calculator"
+    workspace.mkdir()
+
+    monkeypatch.setenv(
+        "PYTHONGPT_RUNTIME_MODE",
+        "docker",
+    )
+    monkeypatch.setenv(
+        "PYTHONGPT_WORKSPACE_MOUNT_MODE",
+        "volume",
+    )
+    monkeypatch.setenv(
+        "PYTHONGPT_WORKSPACE_VOLUME",
+        "pythongpt-workspaces",
+    )
+
+    runtime = Runtime(workspace)
+
+    mount = runtime._workspace_mount()
+
+    assert mount == (
+        "type=volume,"
+        "source=pythongpt-workspaces,"
+        "target=/workspace,"
+        "readonly,"
+        "volume-subpath=broken_calculator"
+    )
+
+    assert str(workspace) not in mount
