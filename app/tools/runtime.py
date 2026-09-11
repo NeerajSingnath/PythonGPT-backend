@@ -157,7 +157,7 @@ class Runtime:
 
         container_name = "pythongpt-" f"{uuid4().hex[:16]}"
 
-        mount = "type=bind," f"source={self.workspace}," "target=/workspace"
+        mount = "type=bind," f"source={self.workspace}," "target=/workspace," "readonly"
 
         command = [
             docker,
