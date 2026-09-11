@@ -5,6 +5,12 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+ALLOWED_PYTHON_MODULES = {
+    "pytest",
+    "ruff",
+    "mypy",
+}
+
 
 class Runtime:
 
@@ -291,10 +297,8 @@ class Runtime:
 
         relative_path = file_path.relative_to(self.workspace)
 
-        container_path = relative_path.as_posix()
-
         if self.mode == "docker":
-            target = container_path
+            target = relative_path.as_posix()
         else:
             target = str(file_path)
 
@@ -306,18 +310,42 @@ class Runtime:
             "Execution timed out.",
         )
 
-    def run_tests(
+    def run_module(
         self,
-        timeout: int = 30,
+        module: str,
+        arguments: list[str] | None = None,
+        timeout: int = 60,
     ) -> dict:
+        if module not in ALLOWED_PYTHON_MODULES:
+            return {
+                "success": False,
+                "error": ("Python module not allowed: " f"{module}"),
+            }
+
+        arguments = arguments or []
+
         self._clear_python_cache()
+
+        timeout_message = f"{module} timed out."
 
         return self._execute(
             [
                 "-m",
-                "pytest",
-                "-q",
+                module,
+                *arguments,
             ],
             timeout,
-            "Tests timed out.",
+            timeout_message,
+        )
+
+    def run_tests(
+        self,
+        timeout: int = 30,
+    ) -> dict:
+        return self.run_module(
+            "pytest",
+            [
+                "-q",
+            ],
+            timeout=timeout,
         )
