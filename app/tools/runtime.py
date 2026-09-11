@@ -1,3 +1,4 @@
+from asyncio import timeout
 import os
 import shutil
 import subprocess
@@ -345,6 +346,8 @@ class Runtime:
         return self.run_module(
             "pytest",
             [
+                "-p",
+                "no:cacheprovider",
                 "-q",
             ],
             timeout=timeout,
