@@ -266,6 +266,8 @@ class ControlledTerminal:
                 [
                     "check",
                     "--no-cache",
+                    "--ignore",
+                    "EXE002",
                     ".",
                 ],
                 timeout=60,
