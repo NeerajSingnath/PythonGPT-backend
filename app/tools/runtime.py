@@ -1,4 +1,3 @@
-from asyncio import timeout
 import os
 import shutil
 import subprocess
@@ -32,11 +31,39 @@ class Runtime:
             "pythongpt-sandbox:latest",
         ).strip()
 
+        self.workspace_mount_mode = (
+            os.getenv(
+                "PYTHONGPT_WORKSPACE_MOUNT_MODE",
+                "bind",
+            )
+            .strip()
+            .lower()
+        )
+
+        self.workspace_volume = os.getenv(
+            "PYTHONGPT_WORKSPACE_VOLUME",
+            "pythongpt-workspaces",
+        ).strip()
+
         if self.mode not in {
             "local",
             "docker",
         }:
             raise ValueError("PYTHONGPT_RUNTIME_MODE must be " "'local' or 'docker'.")
+
+        if self.workspace_mount_mode not in {
+            "bind",
+            "volume",
+        }:
+            raise ValueError(
+                "PYTHONGPT_WORKSPACE_MOUNT_MODE must be " "'bind' or 'volume'."
+            )
+
+        if self.workspace_mount_mode == "volume" and not self.workspace_volume:
+            raise ValueError(
+                "PYTHONGPT_WORKSPACE_VOLUME must not be empty "
+                "when volume mounting is enabled."
+            )
 
     def _safe_file(
         self,
@@ -71,7 +98,6 @@ class Runtime:
         env = os.environ.copy()
 
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-
         env["PYTHONUNBUFFERED"] = "1"
 
         return env
@@ -146,6 +172,22 @@ class Runtime:
         except Exception:
             pass
 
+    def _workspace_mount(
+        self,
+    ) -> str:
+        if self.workspace_mount_mode == "volume":
+            workspace_subpath = self.workspace.name
+
+            return (
+                "type=volume,"
+                f"source={self.workspace_volume},"
+                "target=/workspace,"
+                "readonly,"
+                f"volume-subpath={workspace_subpath}"
+            )
+
+        return "type=bind," f"source={self.workspace}," "target=/workspace," "readonly"
+
     def _docker_command(
         self,
         arguments: list[str],
@@ -164,7 +206,7 @@ class Runtime:
 
         container_name = "pythongpt-" f"{uuid4().hex[:16]}"
 
-        mount = "type=bind," f"source={self.workspace}," "target=/workspace," "readonly"
+        mount = self._workspace_mount()
 
         command = [
             docker,
@@ -279,13 +321,13 @@ class Runtime:
         if not file_path.exists():
             return {
                 "success": False,
-                "error": f"{file} does not exist",
+                "error": (f"{file} does not exist"),
             }
 
         if not file_path.is_file():
             return {
                 "success": False,
-                "error": f"{file} is not a file",
+                "error": (f"{file} is not a file"),
             }
 
         if file_path.suffix.lower() != ".py":
