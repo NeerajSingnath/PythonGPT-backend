@@ -1,3 +1,4 @@
+from app import workspace_manager
 import asyncio
 import re
 from pathlib import Path
@@ -227,6 +228,11 @@ async def execute_agent_run(
 
         if not workspace.exists():
             raise RuntimeError(f"Workspace not found: {workspace_name}")
+
+        workspace_manager.prepare_run_baseline(
+            workspace_name,
+            run_id,
+        )
 
         llm = NvidiaLLMClient(
             thinking=True,

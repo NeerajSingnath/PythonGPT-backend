@@ -66,7 +66,7 @@ class WorkspaceManager:
         self,
         path: Path,
         arguments: list[str],
-    ) -> None:
+    ) -> str:
         git = self._git_executable()
 
         try:
@@ -93,6 +93,114 @@ class WorkspaceManager:
 
             raise RuntimeError(message)
 
+        return result.stdout.strip()
+
+    def _try_git(
+        self,
+        path: Path,
+        arguments: list[str],
+    ) -> tuple[bool, str]:
+        git = self._git_executable()
+
+        try:
+            result = subprocess.run(
+                [
+                    git,
+                    *arguments,
+                ],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                shell=False,
+            )
+        except (
+            subprocess.TimeoutExpired,
+            OSError,
+        ):
+            return False, ""
+
+        return (
+            result.returncode == 0,
+            result.stdout.strip(),
+        )
+
+    def _has_head(
+        self,
+        path: Path,
+    ) -> bool:
+        success, _ = self._try_git(
+            path,
+            [
+                "rev-parse",
+                "--verify",
+                "HEAD",
+            ],
+        )
+
+        return success
+
+    def _is_managed_repository(
+        self,
+        path: Path,
+    ) -> bool:
+        success, value = self._try_git(
+            path,
+            [
+                "config",
+                "--local",
+                "--get",
+                "pythongpt.managed",
+            ],
+        )
+
+        return success and value.lower() == "true"
+
+    def _mark_legacy_managed_repository(
+        self,
+        path: Path,
+    ) -> None:
+        if self._is_managed_repository(path):
+            return
+
+        if self._has_head(path):
+            return
+
+        name_success, name = self._try_git(
+            path,
+            [
+                "config",
+                "--local",
+                "--get",
+                "user.name",
+            ],
+        )
+
+        email_success, email = self._try_git(
+            path,
+            [
+                "config",
+                "--local",
+                "--get",
+                "user.email",
+            ],
+        )
+
+        if (
+            name_success
+            and email_success
+            and name == "PythonGPT"
+            and email == "pythongpt@local"
+        ):
+            self._run_git(
+                path,
+                [
+                    "config",
+                    "pythongpt.managed",
+                    "true",
+                ],
+            )
+
     def _ensure_git_repository(
         self,
         path: Path,
@@ -100,6 +208,7 @@ class WorkspaceManager:
         git_metadata = path / ".git"
 
         if git_metadata.exists():
+            self._mark_legacy_managed_repository(path)
             return
 
         self._run_git(
@@ -146,6 +255,15 @@ class WorkspaceManager:
             ],
         )
 
+        self._run_git(
+            path,
+            [
+                "config",
+                "pythongpt.managed",
+                "true",
+            ],
+        )
+
     def ensure_git_repository(
         self,
         name: str,
@@ -158,6 +276,39 @@ class WorkspaceManager:
         self._ensure_git_repository(path)
 
         return path
+
+    def prepare_run_baseline(
+        self,
+        name: str,
+        run_id: str,
+    ) -> bool:
+        path = self.ensure_git_repository(name)
+
+        if not self._is_managed_repository(path):
+            return False
+
+        self._run_git(
+            path,
+            [
+                "add",
+                "-A",
+            ],
+        )
+
+        self._run_git(
+            path,
+            [
+                "-c",
+                "commit.gpgSign=false",
+                "commit",
+                "--allow-empty",
+                "--no-verify",
+                "-m",
+                f"PythonGPT baseline {run_id}",
+            ],
+        )
+
+        return True
 
     def create(
         self,
